@@ -1,0 +1,10 @@
+# ignore build files
+cmake-build-debug/
+target/
+out/
+
+# ignore idea files that can be regenerated
+!**/.idea/
+**/.idea/*
+!**/.idea/codeStyles/
+!**/.idea/inspectionProfiles/
