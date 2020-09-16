@@ -1,0 +1,118 @@
+\documentclass[12pt]{article}
+\usepackage[english]{babel}
+\usepackage{natbib}
+\usepackage{url}
+\usepackage[utf8x]{inputenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\graphicspath{{images/}}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+\usepackage{vmargin}
+\usepackage{pdfpages}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage[backend=bibtex]{biblatex}
+\addbibresource{references.bib}
+
+\setmarginsrb{3 cm}{2.5 cm}{3 cm}{2.5 cm}{1 cm}{1.5 cm}{1 cm}{1.5 cm}
+
+\makeatletter
+\let\thetitle\@title
+
+\let\thedate\@date
+\makeatother
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{VERSION 01}
+\lhead{CS 550: Advanced Operating Systems}
+%\lfoot{}
+\rfoot{ \thepage}
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{titlepage}
+	\centering
+    \vspace*{0.5 cm}
+    \begin{center}
+    \includegraphics[scale=0.3]{Logo2.png}\\[1.0 cm]	% University Logo
+    \end{center}
+    \textsc{\LARGE Near Data Processing }\\[0.5 cm]
+    \textsc{\LARGE Escaping the von Neumann Bottleneck}\\[0.5 cm]
+    \textsc{\lARGE MD H. I. ALI \& JOSH BOWDEN}\\[0.4 cm]
+    % \textsc{\lARGE }\\[0.4 cm]
+    \textsc{\lARGE MALI54@HAWK.IIT.EDU}\\[0.4 cm]
+    \textsc{\lARGE JBOWDEN@HAWK.IIT.EDU}\\[0.4 cm]
+	\textsc{CS 550: ADVANCED OPERATING SYSTEMS}\\[0.5 cm]% Course Code
+	\rule{\linewidth}{0.2 mm} \\[0.4 cm]
+	{ \huge \bfseries \thetitle}\\
+	
+ 
+	\vfill
+	
+\end{titlepage}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% \tableofcontents
+\pagebreak
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+
+\emph{Near Data Processing} (NDP) \cite{Barbalace2017}, also known as \emph{processing-in-memory} (PIM) \cite{Boroumand2017, Ghose2019}, has emerged from the concept of thinking outside of the box from the traditional {von Nuemann} architecture where computation happens directly on the memory device. Some exploratory work has been done in this area \cite{Aguilera2018}, but an effective runtime architecture has yet to be devised.
+
+Traditionally, data center clusters have ran computing jobs by separate work onto separate nodes under the assumption that network latency and bandwidth is expensive. Additionally, it has been assumed that memory bandwidth between DRAM and CPU is to be avoided as much as possible by utilizing CPU cache as much as possible -- namely the \emph{von Neumann bottleneck}. The current architecture simply is not designed to handle memory-intensive applications that operate on massive data sets inherently limited by how fast the CPU can move memory between its cache hierarchy, memory controller, memory channel, \cite{Aguilera2018}. Recent technologies have show that these assumptions may soon be irrelevant.
+
+\section{Background Information}
+
+With the introduction of \emph{non-volatile main memory} (NVMM), the possibly of having performance akin to DRAM while treating the same memory as storage entirely. This entirely removes the need for transferring between volatile DRAM and and non-volate storage that is orders of magnitude slower.
+
+Additionally with ultra-low latency, high-bandwidth InfiniBand (IB) has opened the idea of \emph{remote direct memory access} (RDMA) allowing directly memory access to other machines memory -- entirely circumventing the CPU. 
+
+\section{Problem Statement}
+
+The issue at hand is that we want to leverage NVMM instead of using the traditional way of having separate processes running on separate nodes in a system. The current problem is that there isn't a reliable or effective runtime architecture that has been created. 
+
+\section{Related Work} 
+Various works have conducted evaluating the potential of RDMA typically over InifiniBand \cite{Liang2005} using file \cite{Yang2020} and memory mapped run-time abstractions. There has been a study conducted with NVMM \cite{Zhang2015} that showcased the reliability and available in the system. This is essential as we will be utilizing is the RDMA and NVMM to leverage a transparency over the system while minimizing the movement of memory. Additional work has evaluated the concept of RDMA enabling a distributed in-memory processing fabic \cite{Novakovic2014}.
+
+\section{Proposed Solution}
+We aim to develop a runtime system that will emulate the architecture of performing computation on a \emph{processing-in-memory} chip next to the memory chips. Since this hardware does not exist in a generally available fashion, we let with little choice but to result to emulating the remote systems.
+
+\section{Evaluation}
+Our evaluation will consists of comparing the two computation in a traditional map-reduce, cluster model versus the virtual global memory space that is partially utilizing our emulation of a PIM system via RDMA.
+
+\section{Conclusions}
+We expect to see that our emulation of a PIM architecture will enable a new computation model that exceeds the memory-bound nature of traditional models. This will be the next stepping stone since there has not been an architecture for memory-intensive application that are used in high performance computing.
+
+\section{Timeline}
+
+\begin{center}
+\begin{tabular}{ |c|c| } 
+ \hline
+ Week & Goal \\ 
+ \hline 
+ 1 & Read papers and compile the relevant information \\ 
+ \hline
+ 2 & Draw out design overhead \\
+ \hline
+ 3 & Code the drivers, etc. \\
+ \hline
+ 4 & Present draft of completion \\ \hline 5 & Fix any experimental mishalfs \\ \hline 6 & Recreate experimental evaluation \\ \hline 
+ 7 & Complete final report \\ \hline 8 &  Complete final presentation \\
+ \hline
+\end{tabular}
+\end{center}
+
+\newpage 
+
+\nocite{*}
+
+\printbibliography
+
+\end{document}
