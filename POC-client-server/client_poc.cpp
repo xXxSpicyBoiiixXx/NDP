@@ -27,8 +27,8 @@ using namespace std;
 int main()
 {
     int client;
-    int portNum = 4444;
-    bool isExit = false;
+    int port_number = 4444;
+    bool exit_func = false;
     int buffsize = 1024;
     char buffer[buffsize];
     char* ip = "127.0.0.1";
@@ -46,10 +46,10 @@ int main()
     cout << "\nSocket client has been created..." << endl;
 
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(portNum);
+    server_addr.sin_port = htons(port_number);
 
     if (connect(client,(struct sockaddr *)&server_addr, sizeof(server_addr)) == 0)
-        cout << "Connection to the server port number: " << portNum << endl;
+        cout << "Connection to the server port number: " << port_number << endl;
 
     cout << "Awaiting connection from the server..." << endl; //line 40
     recv(client, buffer, buffsize, 0);
@@ -66,7 +66,7 @@ int main()
             if (*buffer == '#') {
                 send(client, buffer, buffsize, 0);
                 *buffer = '*';
-                isExit = true;
+                exit_func = true;
             }
         } while (*buffer != 42);
 
@@ -76,13 +76,13 @@ int main()
             cout << buffer << " ";
             if (*buffer == '#') {
                 *buffer = '*';
-                isExit = true;
+                exit_func = true;
             }
 
         } while (*buffer != 42);
         cout << endl;
 
-    } while (!isExit);
+    } while (!exit_func);
 
     cout << "\nConnection terminated.\n";
     close(client);
