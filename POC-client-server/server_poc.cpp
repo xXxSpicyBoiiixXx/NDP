@@ -47,7 +47,7 @@ int main()
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htons(INADDR_ANY);
-    server_addr.sin_port = htons(portNum);
+    server_addr.sin_port = htons(port_number);
 
     if ((bind(client, (struct sockaddr*)&server_addr,sizeof(server_addr))) < 0)
     {
@@ -68,16 +68,16 @@ int main()
     while (server > 0)
     {
         strcpy(buffer, "Server connected...\n");
-        send(server, buffer, bufsize, 0);
+        send(server, buffer, buffer_size, 0);
         cout << "Connected with the client #" << clientCount << ", good to go fam..." << endl;
         cout << "\n Enter # to end the connection\n" << endl;
         cout << "Client: ";
         do {
-            recv(server, buffer, bufsize, 0);
+            recv(server, buffer, buffer_size, 0);
             cout << buffer << " ";
             if (*buffer == '#') {
                 *buffer = '*';
-                isExit = true;
+                exit_func = true;
             }
         } while (*buffer != '*');
 
@@ -85,32 +85,32 @@ int main()
             cout << "\nServer: ";
             do {
                 cin >> buffer;
-                send(server, buffer, bufsize, 0);
+                send(server, buffer, buffer_size, 0);
                 if (*buffer == '#') {
-                    send(server, buffer, bufsize, 0);
+                    send(server, buffer, buffer_size, 0);
                     *buffer = '*';
-                    isExit = true;
+                    exit_func = true;
                 }
             } while (*buffer != '*');
 
             cout << "Client: ";
             do {
-                recv(server, buffer, bufsize, 0);
+                recv(server, buffer, buffer_size, 0);
                 cout << buffer << " ";
                 if (*buffer == '#') {
                     *buffer == '*';
-                    isExit = true;
+                    exit_func = true;
                 }
             } while (*buffer != '*');
-        } while (!isExit);
+        } while (!exit_func);
 
-        cout << "\n\n=> Connection terminated with IP " << inet_ntoa(server_addr.sin_addr);
+        cout << "\n\nConnection terminated with client " << inet_ntoa(server_addr.sin_addr);
         close(server);
-        cout << "\nGoodbye..." << endl;
-        isExit = false;
+        cout << "\nLater..." << endl;
+        exit_func = false;
         exit(1);
     }
 
     close(client);
     return 0;
-}}
+}
