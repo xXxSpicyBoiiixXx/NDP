@@ -27,7 +27,7 @@ using namespace std;
 int main()
 {
     int client;
-    int portNum = 1500; // NOTE that the port number is same for both client and server
+    int portNum = 4444;
     bool isExit = false;
     int buffsize = 1024;
     char buffer[buffsize];
