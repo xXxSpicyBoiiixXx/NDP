@@ -11,12 +11,6 @@ public:
     static mapped_buf create_from_num_pages(uint32_t num_pages);
     static mapped_buf create_from_num_pages(uint32_t num_pages, size_t page_size);
 
-    template<typename T>
-    inline T &operator*()
-    {
-        return *((T *) ptr_);
-    }
-
     [[nodiscard]] void *ptr() const { return ptr_; }
     [[nodiscard]] size_t size() const { return size_; }
     [[nodiscard]] size_t page_size() const { return page_size_; }

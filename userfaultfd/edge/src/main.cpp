@@ -17,6 +17,8 @@
 
 #define DEBUG_USERFAULT 0
 
+
+#define EDGE_FIB_NUM (42)
 uint32_t fib_kernel(uint32_t n)
 {
     uint32_t n1 = -1;
@@ -29,6 +31,60 @@ uint32_t fib_kernel(uint32_t n)
     return n2;
 }
 
+class fn_registration {
+public:
+    explicit fn_registration(uint32_t max_registrations)
+        : max_registrations_(max_registrations)
+        , fns_(max_registrations)
+    { }
+
+    void set_handler(uint32_t slot, void *handler)
+    {
+        if (slot > max_registrations_) {
+            PANIC("handler slot out of range");
+        }
+        fns_[slot] = handler;
+    }
+
+    void *handler_at(uint32_t slot)
+    {
+        void *fn = fns_[slot];
+        PANIC_IF_NULL(fn);
+        return fn;
+    }
+
+private:
+    uint32_t max_registrations_;
+    std::vector<void *> fns_;
+};
+
+class edge_rpc {
+public:
+    explicit edge_rpc(edge::fault_handler_memory &memory)
+        : memory_(memory)
+    { }
+
+    uint32_t fib(uint32_t n)
+    {
+        ((uint32_t *) memory_.request_buf().ptr())[0] = EDGE_FIB_NUM;
+        ((uint32_t *) memory_.request_buf().ptr())[1] = n;
+
+        uint8_t poke = *(volatile uint8_t *) memory_.invoke_buf().ptr();
+
+        uint32_t result = *(uint32_t *) memory_.response_buf().ptr();
+        return result;
+    }
+
+private:
+    edge::fault_handler_memory &memory_;
+};
+
+
+struct fault_ctx {
+    edge::fault_handler_memory &mem;
+    edge::fault_registration &reg;
+    fn_registration &fns;
+};
 
 static void *
 fault_handler_thread(void *arg)
@@ -39,7 +95,7 @@ fault_handler_thread(void *arg)
     //
 
     PANIC_IF_NULL(arg);
-    auto &ctx = *(edge::fault_registration *) arg;
+    auto &ctx = *(fault_ctx *) arg;
 
     // Create page (if not already) that will be copied later into the requested page
     if (!page.has_value()) {
@@ -48,7 +104,7 @@ fault_handler_thread(void *arg)
 
     // Loop handling any events from the userfaultfd file descriptor
     while (true) {
-        auto pollfd = ctx.make_pollfd();
+        auto pollfd = ctx.reg.make_pollfd();
         int32_t num_ready = poll(&pollfd, 1, -1);
         if (num_ready < 0) {
             PANIC("poll");
@@ -63,12 +119,7 @@ fault_handler_thread(void *arg)
 #endif
 
         // Read event from file descriptor
-        auto msg = ctx.read();
-
-        // Get faulting address
-#define PAGE_ALIGN(X, SIZE) ((X) & ~(SIZE - 1))
-        size_t req_addr = msg.faulting_address();
-        size_t req_addr_page_start = msg.faulting_page_address();
+        auto msg = ctx.reg.read();
 
         // Print debug information
 #if DEBUG_USERFAULT
@@ -77,16 +128,27 @@ fault_handler_thread(void *arg)
         printf("address = %llx\n", msg.arg.pagefault.address);
 #endif
 
-        // Write the result into our copy of the result page
-        memset(page->ptr(), (int32_t)('A' + (num_faults % 20)), ctx.page_size());
+        // Invoke function
+        // TODO: Handle arbitrary function signature
+        auto *input = (uint32_t *) ctx.mem.request_buf().ptr();
+
+        typedef uint32_t fn_sig(uint32_t);
+        auto *fn = (fn_sig *) ctx.fns.handler_at(input[0]);
+
+        uint32_t arg0 = input[1];
+        uint32_t result = fn(arg0);
+
+        ((uint32_t *) ctx.mem.response_buf().ptr())[0] = result;
+
         num_faults++;
-        ctx.respond_with(msg, *page);
+        ctx.reg.respond_with(msg, *page);
 
 #if DEBUG_USERFAULT
         printf("uffdio_copy: copied %lld bytes\n", copy_cmd.copy);
 #endif
     }
 }
+
 
 int main()
 {
@@ -96,7 +158,17 @@ int main()
         .num_request_pages = 1,
         .num_response_pages = 1,
     });
-    static auto ctx = edge::fault_registration(mem.invoke_buf());
+
+    static auto reg = edge::fault_registration(mem.invoke_buf());
+
+    static auto fns = fn_registration(1000);
+    fns.set_handler(EDGE_FIB_NUM, (void *) &fib_kernel);
+
+    static fault_ctx ctx = {
+            .mem = mem,
+            .reg = reg,
+            .fns = fns,
+    };
 
     // Create thread to handle userfaultfd events
     pthread_t handler_thread;
@@ -109,26 +181,17 @@ int main()
         PANIC("pthread_create: failed with %d", result);
     }
 
-    // Trigger page faults by reading from 1024 bytes apart
-    int l = 0x0; // avoid faulting on page boundary to make things clear
-    char *buf = static_cast<char *>(mem.invoke_buf().ptr());
-    for (; l < mem.invoke_buf().size(); l += 0x100) {
-        using namespace std::chrono;
+    auto rpc = edge_rpc(mem);
+    uint32_t fib_n = 10;
 
-        char *addr = buf + l;
-        auto start = high_resolution_clock::now();
+    using namespace std::chrono;
+    auto start = high_resolution_clock::now();
 
-        char c = *addr;
+    uint32_t answer = rpc.fib(fib_n);
 
-        auto end = high_resolution_clock::now();
-        auto dur = duration_cast<nanoseconds>(end - start);
+    auto end = high_resolution_clock::now();
+    auto dur = duration_cast<nanoseconds>(end - start);
 
-        printf("read %lx = %c, fault took %ld nanos\n",
-               addr - buf,
-               c,
-               dur.count());
-        usleep(10000);
-    }
-
+    printf("fib(%d) = %d | call took %ld nanos\n", fib_n, answer, dur.count());
     return 0;
 }
