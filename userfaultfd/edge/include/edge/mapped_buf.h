@@ -14,6 +14,7 @@ public:
     [[nodiscard]] void *ptr() const { return ptr_; }
     [[nodiscard]] size_t size() const { return size_; }
     [[nodiscard]] size_t page_size() const { return page_size_; }
+    [[nodiscard]] size_t num_pages() const { return size_ / page_size_; }
 
 private:
     mapped_buf(size_t mem_size, size_t page_sizes);

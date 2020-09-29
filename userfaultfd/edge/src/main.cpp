@@ -8,23 +8,28 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <poll.h>
+#include <sys/resource.h>
 
 #include <edge/panic.h>
 #include <edge/fault_handler_memory.h>
 #include <edge/fault_registration.h>
 #include <edge/mapped_buf.h>
+#include <sys/mman.h>
+#include <linux/mman.h>
+#include <cerrno>
+#include <atomic>
 
 
 #define DEBUG_USERFAULT 0
 
 
 #define EDGE_FIB_NUM (42)
-uint32_t fib_kernel(uint32_t n)
+uint64_t fib_kernel(uint32_t n)
 {
-    uint32_t n1 = -1;
-    uint32_t n2 = 1;
+    uint64_t n1 = -1;
+    uint64_t n2 = 1;
     for (uint32_t i = 0; i <= n; ++i) {
-        uint32_t sum = n1 + n2;
+        uint64_t sum = n1 + n2;
         n1 = n2;
         n2 = sum;
     }
@@ -58,20 +63,21 @@ private:
     std::vector<void *> fns_;
 };
 
+
 class edge_rpc {
 public:
     explicit edge_rpc(edge::fault_handler_memory &memory)
         : memory_(memory)
     { }
 
-    uint32_t fib(uint32_t n)
+    uint64_t fib(uint32_t n)
     {
         ((uint32_t *) memory_.request_buf().ptr())[0] = EDGE_FIB_NUM;
         ((uint32_t *) memory_.request_buf().ptr())[1] = n;
 
         uint8_t poke = *(volatile uint8_t *) memory_.invoke_buf().ptr();
 
-        uint32_t result = *(uint32_t *) memory_.response_buf().ptr();
+        uint64_t result = *(uint64_t *) memory_.response_buf().ptr();
         return result;
     }
 
@@ -86,11 +92,12 @@ struct fault_ctx {
     fn_registration &fns;
 };
 
+static std::atomic<uint32_t> num_faults(0);
+
 static void *
 fault_handler_thread(void *arg)
 {
     static std::optional<edge::mapped_buf> page;
-    static uint64_t num_faults = 0;
 
     //
 
@@ -132,13 +139,13 @@ fault_handler_thread(void *arg)
         // TODO: Handle arbitrary function signature
         auto *input = (uint32_t *) ctx.mem.request_buf().ptr();
 
-        typedef uint32_t fn_sig(uint32_t);
+        typedef uint64_t fn_sig(uint32_t);
         auto *fn = (fn_sig *) ctx.fns.handler_at(input[0]);
 
         uint32_t arg0 = input[1];
-        uint32_t result = fn(arg0);
+        uint64_t result = fn(arg0);
 
-        ((uint32_t *) ctx.mem.response_buf().ptr())[0] = result;
+        ((uint64_t *) ctx.mem.response_buf().ptr())[0] = result;
 
         num_faults++;
         ctx.reg.respond_with(msg, *page);
@@ -149,9 +156,38 @@ fault_handler_thread(void *arg)
     }
 }
 
+typedef struct {
+    unsigned long size,resident,share,text,lib,data,dt;
+} statm_t;
+
+statm_t read_off_memory_status()
+{
+    statm_t result;
+
+    unsigned long dummy;
+    const char* statm_path = "/proc/self/statm";
+
+    FILE *f = fopen(statm_path,"r");
+    if(!f){
+        perror(statm_path);
+        abort();
+    }
+    if(7 != fscanf(f,"%ld %ld %ld %ld %ld %ld %ld",
+                   &result.size,&result.resident,&result.share,&result.text,&result.lib,&result.data,&result.dt))
+    {
+        perror(statm_path);
+        abort();
+    }
+    fclose(f);
+
+    return result;
+}
+
 
 int main()
 {
+    printf("mark 1: RSS = %ld kb\n", read_off_memory_status().resident);
+
     // Create and setup `userfaultfd` object
     auto mem = edge::fault_handler_memory::create({
         .num_invoke_pages = 1,
@@ -170,6 +206,8 @@ int main()
             .fns = fns,
     };
 
+    printf("mark 2: RSS = %ld kb\n", read_off_memory_status().resident);
+
     // Create thread to handle userfaultfd events
     pthread_t handler_thread;
     int32_t result = pthread_create(
@@ -181,17 +219,78 @@ int main()
         PANIC("pthread_create: failed with %d", result);
     }
 
+    printf("mark 3: RSS = %ld kb\n", read_off_memory_status().resident);
+
     auto rpc = edge_rpc(mem);
     uint32_t fib_n = 10;
 
+    //
+
     using namespace std::chrono;
+
     auto start = high_resolution_clock::now();
 
-    uint32_t answer = rpc.fib(fib_n);
+    uint64_t answer = rpc.fib(fib_n);
 
     auto end = high_resolution_clock::now();
     auto dur = duration_cast<nanoseconds>(end - start);
 
-    printf("fib(%d) = %d | call took %ld nanos\n", fib_n, answer, dur.count());
+    printf("fib(%d) = %d | (dirty) call took %ld nanos\n", fib_n, answer, dur.count());
+
+    printf("mark 4: RSS = %ld kb\n", read_off_memory_status().resident);
+
+    //
+    // call without invalidating
+    //
+
+    start = high_resolution_clock::now();
+
+    answer = rpc.fib(fib_n);
+
+    end = high_resolution_clock::now();
+    dur = duration_cast<nanoseconds>(end - start);
+
+    printf("fib(%d) = %d | (w/o invalidate) call took %ld nanos\n", fib_n, answer, dur
+    .count());
+
+    printf("mark 5: RSS = %ld kb\n", read_off_memory_status().resident);
+
+    //
+    // call with invalidating
+    //
+
+    auto swap_page = edge::mapped_buf::create_from_num_pages(mem.invoke_buf().num_pages());
+
+    for (uint32_t k = 0; k < 100; k++) {
+        start = high_resolution_clock::now();
+
+        void *remapped = mremap(
+                mem.invoke_buf().ptr(),
+                mem.invoke_buf().size(),
+                mem.invoke_buf().size(),
+                MREMAP_MAYMOVE | MREMAP_DONTUNMAP | MREMAP_FIXED,
+                swap_page.ptr());
+        if (remapped == MAP_FAILED) {
+            static char errstrbuf[512] = {};
+            char *errstr = strerror_r(errno, errstrbuf, sizeof(errstrbuf));
+            PANIC("mremap: failed to invalidate page: %s", errstr);
+        }
+
+        munmap(remapped, mem.invoke_buf().size());
+
+        answer = rpc.fib(fib_n);
+
+        end = high_resolution_clock::now();
+        dur = duration_cast<nanoseconds>(end - start);
+
+        printf("[%d faults | RSS = %ld kb] fib(%d) = %ld | (dirty) took %ld nanos\n",
+               num_faults.load(),
+               read_off_memory_status().resident,
+               fib_n,
+               answer,
+               dur
+        .count());
+    }
+
     return 0;
 }
