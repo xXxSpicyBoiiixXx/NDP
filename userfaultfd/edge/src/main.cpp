@@ -147,7 +147,7 @@ fault_handler_thread(void *arg)
 
         ((uint64_t *) ctx.mem.response_buf().ptr())[0] = result;
 
-        num_faults++;
+//        num_faults++;
         ctx.reg.respond_with(msg, *page);
 
 #if DEBUG_USERFAULT
@@ -222,7 +222,7 @@ int main()
     printf("mark 3: RSS = %ld kb\n", read_off_memory_status().resident);
 
     auto rpc = edge_rpc(mem);
-    uint32_t fib_n = 10;
+    uint32_t fib_n = 1;
 
     //
 
@@ -259,9 +259,11 @@ int main()
     // call with invalidating
     //
 
+    FILE *fnull = fopen("/dev/null", "w");
+
     auto swap_page = edge::mapped_buf::create_from_num_pages(mem.invoke_buf().num_pages());
 
-    for (uint32_t k = 0; k < 100; k++) {
+    for (uint32_t k = 0; k < 100000; k++) {
         start = high_resolution_clock::now();
 
         void *remapped = mremap(
@@ -283,13 +285,15 @@ int main()
         end = high_resolution_clock::now();
         dur = duration_cast<nanoseconds>(end - start);
 
-        printf("[%d faults | RSS = %ld kb] fib(%d) = %ld | (dirty) took %ld nanos\n",
-               num_faults.load(),
-               read_off_memory_status().resident,
-               fib_n,
-               answer,
-               dur
-        .count());
+        fprintf(fnull, "%lu", answer);
+        printf("%ld\n", dur.count());
+//        printf("[%d faults | RSS = %ld kb] fib(%d) = %ld | (dirty) took %ld nanos\n",
+//               num_faults.load(),
+//               read_off_memory_status().resident,
+//               fib_n,
+//               answer,
+//               dur
+//        .count());
     }
 
     return 0;
