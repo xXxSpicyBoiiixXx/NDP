@@ -45,15 +45,15 @@ edge::fault_msg fault_registration::read() const
     struct uffd_msg msg = {};
     ssize_t num_read = ::read(fd_, &msg, sizeof(msg));
     if (num_read == 0) {
-        PANIC("read: got unexpected EOF");
+        PANIC("read_into: got unexpected EOF");
     }
     if (num_read < 0) {
-        PANIC("read: invalid result");
+        PANIC("read_into: invalid result");
     }
 
     // Verify event received
     if (msg.event != UFFD_EVENT_PAGEFAULT) {
-        PANIC("read: bad uffd_msg.event type");
+        PANIC("read_into: bad uffd_msg.event type");
     }
 
     return fault_msg(msg);

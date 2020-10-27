@@ -320,7 +320,6 @@ private:
 
 void client_handler_thread(std::unique_ptr<edge_client_context> ctx)
 {
-
     using namespace std::chrono;
     auto start = high_resolution_clock::now();
 

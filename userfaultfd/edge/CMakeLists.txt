@@ -17,5 +17,6 @@ target_sources(edge PRIVATE
         src/fault_registration.cpp
         src/fault_msg.cpp
         src/internal/uffd.cpp
+        src/networking/buffer_context.cpp
         )
 
