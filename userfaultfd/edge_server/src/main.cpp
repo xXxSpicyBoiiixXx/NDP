@@ -2,23 +2,25 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <optional>
 #include <chrono>
+#include <thread>
+#include <memory>
+#include <atomic>
 
+#include <linux/mman.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
 #include <poll.h>
-#include <sys/resource.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
 
-#include <edge/panic.h>
 #include <edge/fault_handler_memory.h>
 #include <edge/fault_registration.h>
 #include <edge/mapped_buf.h>
-#include <sys/mman.h>
-#include <linux/mman.h>
-#include <cerrno>
-#include <atomic>
-
+#include <edge/panic.h>
 
 #define DEBUG_USERFAULT 0
 
@@ -85,77 +87,6 @@ private:
     edge::fault_handler_memory &memory_;
 };
 
-
-struct fault_ctx {
-    edge::fault_handler_memory &mem;
-    edge::fault_registration &reg;
-    fn_registration &fns;
-};
-
-static std::atomic<uint32_t> num_faults(0);
-
-static void *
-fault_handler_thread(void *arg)
-{
-    static std::optional<edge::mapped_buf> page;
-
-    //
-
-    PANIC_IF_NULL(arg);
-    auto &ctx = *(fault_ctx *) arg;
-
-    // Create page (if not already) that will be copied later into the requested page
-    if (!page.has_value()) {
-        page.emplace(edge::mapped_buf::create_from_num_pages(1));
-    }
-
-    // Loop handling any events from the userfaultfd file descriptor
-    while (true) {
-        auto pollfd = ctx.reg.make_pollfd();
-        int32_t num_ready = poll(&pollfd, 1, -1);
-        if (num_ready < 0) {
-            PANIC("poll");
-        }
-
-#if DEBUG_USERFAULT
-        printf("\nfault_handler_thread():\n");
-        printf("    poll() returns: nready = %d; "
-               "POLLIN = %d; POLLERR = %d\n", num_ready,
-               (pollfd.revents & POLLIN) != 0,
-               (pollfd.revents & POLLERR) != 0);
-#endif
-
-        // Read event from file descriptor
-        auto msg = ctx.reg.read();
-
-        // Print debug information
-#if DEBUG_USERFAULT
-        printf("    UFFD_EVENT_PAGEFAULT event: ");
-        printf("flags = %llx; ", msg.arg.pagefault.flags);
-        printf("address = %llx\n", msg.arg.pagefault.address);
-#endif
-
-        // Invoke function
-        // TODO: Handle arbitrary function signature
-        auto *input = (uint32_t *) ctx.mem.request_buf().ptr();
-
-        typedef uint64_t fn_sig(uint32_t);
-        auto *fn = (fn_sig *) ctx.fns.handler_at(input[0]);
-
-        uint32_t arg0 = input[1];
-        uint64_t result = fn(arg0);
-
-        ((uint64_t *) ctx.mem.response_buf().ptr())[0] = result;
-
-//        num_faults++;
-        ctx.reg.respond_with(msg, *page);
-
-#if DEBUG_USERFAULT
-        printf("uffdio_copy: copied %lld bytes\n", copy_cmd.copy);
-#endif
-    }
-}
-
 typedef struct {
     unsigned long size,resident,share,text,lib,data,dt;
 } statm_t;
@@ -183,110 +114,223 @@ statm_t read_off_memory_status()
     return result;
 }
 
+class edge_server_context {
+public:
+    using handler_fn_t = void *(*)(void *);
 
-int main()
-{
-    printf("mark 1: RSS = %ld kb\n", read_off_memory_status().resident);
-
-    // Create and setup `userfaultfd` object
-    auto mem = edge::fault_handler_memory::create({
-        .num_invoke_pages = 1,
-        .num_request_pages = 1,
-        .num_response_pages = 1,
-    });
-
-    static auto reg = edge::fault_registration(mem.invoke_buf());
-
-    static auto fns = fn_registration(1000);
-    fns.set_handler(EDGE_FIB_NUM, (void *) &fib_kernel);
-
-    static fault_ctx ctx = {
-            .mem = mem,
-            .reg = reg,
-            .fns = fns,
-    };
-
-    printf("mark 2: RSS = %ld kb\n", read_off_memory_status().resident);
-
-    // Create thread to handle userfaultfd events
-    pthread_t handler_thread;
-    int32_t result = pthread_create(
-            &handler_thread,
-            nullptr,
-            fault_handler_thread,
-            (void *) &ctx);
-    if (result != 0) {
-        PANIC("pthread_create: failed with %d", result);
+    edge_server_context(
+            edge::fault_handler_memory_spec &memory_spec,
+            uint32_t num_function_reg,
+            handler_fn_t handler_fn)
+    : mem_(create_memory_default(memory_spec))
+    , reg_(create_registration(mem_))
+    , handler_thread_(create_handler_thread(this, handler_fn))
+    , fns_(fn_registration(num_function_reg))
+    , swap_buf_(create_swap_page(mem_))
+    {
     }
 
-    printf("mark 3: RSS = %ld kb\n", read_off_memory_status().resident);
-
-    auto rpc = edge_rpc(mem);
-    uint32_t fib_n = 1;
-
-    //
-
-    using namespace std::chrono;
-
-    auto start = high_resolution_clock::now();
-
-    uint64_t answer = rpc.fib(fib_n);
-
-    auto end = high_resolution_clock::now();
-    auto dur = duration_cast<nanoseconds>(end - start);
-
-    printf("fib(%d) = %d | (dirty) call took %ld nanos\n", fib_n, answer, dur.count());
-
-    printf("mark 4: RSS = %ld kb\n", read_off_memory_status().resident);
-
-    //
-    // call without invalidating
-    //
-
-    start = high_resolution_clock::now();
-
-    answer = rpc.fib(fib_n);
-
-    end = high_resolution_clock::now();
-    dur = duration_cast<nanoseconds>(end - start);
-
-    printf("fib(%d) = %d | (w/o invalidate) call took %ld nanos\n", fib_n, answer, dur
-    .count());
-
-    printf("mark 5: RSS = %ld kb\n", read_off_memory_status().resident);
-
-    //
-    // call with invalidating
-    //
-
-    FILE *fnull = fopen("/dev/null", "w");
-
-    auto swap_page = edge::mapped_buf::create_from_num_pages(mem.invoke_buf().num_pages());
-
-    for (uint32_t k = 0; k < 100000; k++) {
-        start = high_resolution_clock::now();
-
+    void invalidate()
+    {
         void *remapped = mremap(
-                mem.invoke_buf().ptr(),
-                mem.invoke_buf().size(),
-                mem.invoke_buf().size(),
+                mem_.invoke_buf().ptr(),
+                mem_.invoke_buf().size(),
+                mem_.invoke_buf().size(),
                 MREMAP_MAYMOVE | MREMAP_DONTUNMAP | MREMAP_FIXED,
-                swap_page.ptr());
+                swap_buf_.ptr());
         if (remapped == MAP_FAILED) {
             static char errstrbuf[512] = {};
             char *errstr = strerror_r(errno, errstrbuf, sizeof(errstrbuf));
             PANIC("mremap: failed to invalidate page: %s", errstr);
         }
 
-        munmap(remapped, mem.invoke_buf().size());
+        munmap(remapped, mem_.invoke_buf().size());
+    }
 
-        answer = rpc.fib(fib_n);
+    [[nodiscard]] edge::fault_handler_memory &memory()
+    {
+        return mem_;
+    }
 
-        end = high_resolution_clock::now();
-        dur = duration_cast<nanoseconds>(end - start);
+    [[nodiscard]] edge::fault_registration &registration()
+    {
+        return reg_;
+    }
 
-        fprintf(fnull, "%lu", answer);
-        printf("%ld\n", dur.count());
+    [[nodiscard]] fn_registration &functions()
+    {
+        return fns_;
+    }
+
+private:
+    edge::fault_handler_memory mem_;
+    edge::fault_registration reg_;
+    fn_registration fns_;
+    pthread_t handler_thread_;
+    edge::mapped_buf swap_buf_;
+
+    static edge::fault_handler_memory create_memory_default(edge::fault_handler_memory_spec &spec)
+    {
+        printf("mark 1: RSS = %ld kb\n", read_off_memory_status().resident);
+
+        // Create and setup `userfaultfd` object
+        auto mem = edge::fault_handler_memory::create(spec);
+
+        return mem;
+    }
+
+    static edge::fault_registration create_registration(edge::fault_handler_memory &mem) {
+        auto reg = edge::fault_registration(mem.invoke_buf());
+        return reg;
+    }
+
+    static pthread_t create_handler_thread(edge_server_context *ctx, handler_fn_t handle_fn)
+    {
+        pthread_t handler_thread;
+        int32_t result = pthread_create(
+                &handler_thread,
+                nullptr,
+                handle_fn,
+                (void *) ctx);
+        if (result != 0) {
+            PANIC("pthread_create: failed with %d", result);
+        }
+
+        return handler_thread;
+    }
+
+    static edge::mapped_buf create_swap_page(edge::fault_handler_memory &mem)
+    {
+        auto swap_page = edge::mapped_buf::create_from_num_pages(mem.invoke_buf().num_pages());
+        return swap_page;
+    }
+};
+
+static std::atomic<uint32_t> num_faults(0);
+
+static void *
+fault_handler_thread(void *arg)
+{
+    static std::optional<edge::mapped_buf> page;
+
+    //
+
+    PANIC_IF_NULL(arg);
+    auto &ctx = *(edge_server_context *) arg;
+
+    // Create page (if not already) that will be copied later into the requested page
+    if (!page.has_value()) {
+        page.emplace(edge::mapped_buf::create_from_num_pages(1));
+    }
+
+    // Loop handling any events from the userfaultfd file descriptor
+    while (true) {
+        auto pollfd = ctx.registration().make_pollfd();
+        int32_t num_ready = poll(&pollfd, 1, -1);
+        if (num_ready < 0) {
+            PANIC("poll");
+        }
+
+#if DEBUG_USERFAULT
+        printf("\nfault_handler_thread():\n");
+        printf("    poll() returns: nready = %d; "
+               "POLLIN = %d; POLLERR = %d\n", num_ready,
+               (pollfd.revents & POLLIN) != 0,
+               (pollfd.revents & POLLERR) != 0);
+#endif
+
+        // Read event from file descriptor
+        auto msg = ctx.registration().read();
+
+        // Print debug information
+#if DEBUG_USERFAULT
+        printf("    UFFD_EVENT_PAGEFAULT event: ");
+        printf("flags = %llx; ", msg.arg.pagefault.flags);
+        printf("address = %llx\n", msg.arg.pagefault.address);
+#endif
+
+        // Invoke function
+        // TODO: Handle arbitrary function signature
+        auto *input = (uint32_t *) ctx.memory().request_buf().ptr();
+
+        typedef uint64_t fn_sig(uint32_t);
+        auto *fn = (fn_sig *) ctx.functions().handler_at(input[0]);
+
+        uint32_t arg0 = input[1];
+        uint64_t result = fn(arg0);
+
+        ((uint64_t *) ctx.memory().response_buf().ptr())[0] = result;
+
+//        num_faults++;
+        ctx.registration().respond_with(msg, *page);
+
+#if DEBUG_USERFAULT
+        printf("uffdio_copy: copied %lld bytes\n", copy_cmd.copy);
+#endif
+    }
+}
+
+int start_listening(uint16_t portno)
+{
+    int result;
+
+    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    PANIC_IF_NEG_WITH_ERRNO(socket_fd, "failed to open socket: socket");
+
+    int flag = 1;
+    result = setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, (const void *) &flag, sizeof(flag));
+    PANIC_IF_NEG_WITH_ERRNO(result, "setsockopt");
+
+    struct sockaddr_in serveraddr = {};
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serveraddr.sin_port = htons(portno);
+    result = bind(socket_fd, (struct sockaddr *)&serveraddr, sizeof(serveraddr));
+    PANIC_IF_NEG_WITH_ERRNO(result, "bind");
+
+    return socket_fd;
+}
+
+class edge_client_context {
+public:
+    edge_client_context(edge_server_context &parent, const sockaddr_in client_addr, socklen_t client_addr_len)
+        : parent_(parent)
+        , client_addr_(client_addr)
+        , client_addr_len_(client_addr_len)
+    {}
+
+    edge_server_context &parent()
+    {
+        return parent_;
+    }
+    const sockaddr_in &client_addr()
+    {
+        return client_addr_;
+    }
+    socklen_t client_addr_len()
+    {
+        return client_addr_len_;
+    }
+
+private:
+    edge_server_context &parent_;
+    struct sockaddr_in client_addr_;
+    socklen_t client_addr_len_;
+};
+
+void client_handler_thread(std::unique_ptr<edge_client_context> ctx)
+{
+
+    using namespace std::chrono;
+    auto start = high_resolution_clock::now();
+
+    edge_rpc rpc(ctx->parent().memory());
+    auto answer = rpc.fib(1);
+
+    auto end = high_resolution_clock::now();
+    auto dur = duration_cast<nanoseconds>(end - start);
+
+    printf("%ld\n", dur.count());
 //        printf("[%d faults | RSS = %ld kb] fib(%d) = %ld | (dirty) took %ld nanos\n",
 //               num_faults.load(),
 //               read_off_memory_status().resident,
@@ -294,6 +338,48 @@ int main()
 //               answer,
 //               dur
 //        .count());
+
+
+}
+
+int main()
+{
+    int result = 0;
+
+    edge::fault_handler_memory_spec memory_spec = {
+            .num_invoke_pages = 1,
+            .num_request_pages = 1,
+            .num_response_pages = 1,
+    };
+    edge_server_context ctx(memory_spec, 100, fault_handler_thread);
+
+    std::vector<std::thread> client_threads;
+
+    //
+    // start listening on the port
+    //
+
+    int socket_fd = start_listening(9000);
+    result = listen(socket_fd, 128);
+    PANIC_IF_NEG_WITH_ERRNO(result, "listen");
+
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = 0;
+    while (true) {
+        bzero(&client_addr, sizeof(client_addr));
+        client_addr_len = 0;
+        int client_fd = accept(socket_fd, reinterpret_cast<sockaddr *>(&client_addr), &client_addr_len);
+        if (client_fd < 0) {
+            WARN_WITH_ERRNO("accept");
+            continue;
+        }
+
+        auto client_ctx = std::make_unique<edge_client_context>(
+                ctx,
+                client_addr,
+                client_addr_len);
+
+        client_threads.emplace_back(client_handler_thread, std::move(client_ctx));
     }
 
     return 0;

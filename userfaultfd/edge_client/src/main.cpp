@@ -4,20 +4,22 @@
 #include <cstring>
 #include <optional>
 #include <chrono>
+#include <thread>
 
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <poll.h>
 #include <sys/resource.h>
 
-#include <edge/panic.h>
+#include <atomic>
+#include <cerrno>
 #include <edge/fault_handler_memory.h>
 #include <edge/fault_registration.h>
 #include <edge/mapped_buf.h>
-#include <sys/mman.h>
+#include <edge/panic.h>
 #include <linux/mman.h>
-#include <cerrno>
-#include <atomic>
+#include <sys/mman.h>
+#include <thread>
 
 
 #define DEBUG_USERFAULT 0
@@ -86,7 +88,7 @@ private:
 };
 
 
-struct fault_ctx {
+struct edge_server_context {
     edge::fault_handler_memory &mem;
     edge::fault_registration &reg;
     fn_registration &fns;
@@ -94,15 +96,14 @@ struct fault_ctx {
 
 static std::atomic<uint32_t> num_faults(0);
 
-static void *
-fault_handler_thread(void *arg)
+static void
+fault_handler_thread(edge_server_context *ctx_ptr)
 {
+    auto &ctx = *ctx_ptr;
+
     static std::optional<edge::mapped_buf> page;
 
     //
-
-    PANIC_IF_NULL(arg);
-    auto &ctx = *(fault_ctx *) arg;
 
     // Create page (if not already) that will be copied later into the requested page
     if (!page.has_value()) {
@@ -200,7 +201,7 @@ int main()
     static auto fns = fn_registration(1000);
     fns.set_handler(EDGE_FIB_NUM, (void *) &fib_kernel);
 
-    static fault_ctx ctx = {
+    static edge_server_context ctx = {
             .mem = mem,
             .reg = reg,
             .fns = fns,
@@ -209,15 +210,9 @@ int main()
     printf("mark 2: RSS = %ld kb\n", read_off_memory_status().resident);
 
     // Create thread to handle userfaultfd events
-    pthread_t handler_thread;
-    int32_t result = pthread_create(
-            &handler_thread,
-            nullptr,
+    auto handle_thread = std::thread(
             fault_handler_thread,
-            (void *) &ctx);
-    if (result != 0) {
-        PANIC("pthread_create: failed with %d", result);
-    }
+            &ctx);
 
     printf("mark 3: RSS = %ld kb\n", read_off_memory_status().resident);
 
