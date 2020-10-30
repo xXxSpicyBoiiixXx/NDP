@@ -1,0 +1,17 @@
+[package]
+name = "bolt"
+version = "0.1.0"
+authors = ["Josh Bowden <josbow@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "0.5"
+async-trait = "0.1.41"
+serde = { version = "1.0", features = ["derive"] }
+rmp-serde = "0.14"
+tokio = { version = "0.2.22", features = ["sync", "dns", "tcp", "rt-core", "rt-util", "rt-threaded", "blocking", "io-util"] }
+tokio-util = { version = "0.4", features = ["codec"] }
+serde_bytes = "0.11"
+snafu = "0.6"

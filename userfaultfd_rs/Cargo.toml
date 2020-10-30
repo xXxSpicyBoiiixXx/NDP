@@ -1,0 +1,2 @@
+[workspace]
+members = ["bolt", "edge", "edge_client", "edge_server"]
