@@ -18,10 +18,12 @@ pub mod buffer;
 pub mod nodes;
 
 pub mod message_kind {
-    pub const REQUEST_LISTING: &str = "LIST";
-    pub const RESPONSE_LISTING: &str = "FILES";
-    pub const REQUEST_FETCH: &str = "FETCH";
-    pub const RESPONSE_CHUNK: &str = "DATA";
+    pub const REQUEST_ALLOC: &str = "ALLOC";
+    pub const REQUEST_WRITE: &str = "WRITE";
+    pub const REQUEST_READ: &str = "READ";
+    pub const RESPONSE_OK_HANDLE: &str = "OK_H";
+    pub const RESPONSE_OK_BUFFER: &str = "OK_B";
+    pub const RESPONSE_ERR: &str = "ERR";
 }
 
 #[cfg(test)]

@@ -10,10 +10,10 @@ use bytes::BytesMut;
 use rmps::{Serializer};
 use serde::{Deserialize, Serialize};
 
-use crate::messages::{RequestBody, ResponseBody, FileChunkResponse, FileListingResponse, MessageKindTagged, FileFetchRequest, FileListingRequest};
 use crate::buffer::{BufferContext, BufferState};
-use crate::message_kind;
+use crate::{message_kind, messages};
 use std::borrow::{BorrowMut, Borrow};
+use crate::messages::{ResponseBody, OkWithHandleResponse, OkWithBufferResponse, ErrResponse, MessageKindTagged, RequestBody, AllocRequest};
 
 pub struct MessageCodec<'a, M: MessageDecoder> {
     header: &'a MessageHeaderDecoded,
@@ -72,13 +72,17 @@ impl MessageDecoder for RequestBody {
     fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self::Message, Self::Error> {
         let mut reader = Cursor::new(buf.clone());
         let result = match meta.header.kind.as_str() {
-            message_kind::REQUEST_FETCH => {
-                let x = rmps::from_read::<_, FileFetchRequest>(&mut reader)?;
-                Ok(RequestBody::Fetch(x))
+            message_kind::REQUEST_ALLOC => {
+                let x = rmps::from_read::<_, messages::AllocRequest>(&mut reader)?;
+                Ok(RequestBody::Alloc(x))
             },
-            message_kind::REQUEST_LISTING => {
-                let x = rmps::from_read::<_, FileListingRequest>(&mut reader)?;
-                Ok(RequestBody::Listing(x))
+            message_kind::REQUEST_READ => {
+                let x = rmps::from_read::<_, messages::ReadRequest>(&mut reader)?;
+                Ok(RequestBody::Read(x))
+            },
+            message_kind::REQUEST_WRITE => {
+                let x = rmps::from_read::<_, messages::WriteRequest>(&mut reader)?;
+                Ok(RequestBody::Write(x))
             },
             _ => Err(rmps::decode::Error::OutOfRange),
         };
@@ -99,14 +103,18 @@ impl MessageDecoder for ResponseBody {
         let mut reader = Cursor::new(buf.clone());
         let kind = meta.header.kind.as_str();
         let result = match kind {
-            message_kind::RESPONSE_CHUNK => {
-                let x = rmps::from_read::<_, FileChunkResponse>(&mut reader)?;
-                Ok(ResponseBody::Chunk(x))
+            message_kind::RESPONSE_OK_HANDLE => {
+                let x = rmps::from_read::<_, OkWithHandleResponse>(&mut reader)?;
+                Ok(ResponseBody::OkWithHandle(x))
             },
-            message_kind::RESPONSE_LISTING => {
-                let x = rmps::from_read::<_, FileListingResponse>(&mut reader)?;
-                Ok(ResponseBody::Listing(x))
-            }
+            message_kind::RESPONSE_OK_BUFFER => {
+                let x = rmps::from_read::<_, OkWithBufferResponse>(&mut reader)?;
+                Ok(ResponseBody::OkWithBuffer(x))
+            },
+            message_kind::RESPONSE_ERR => {
+                let x = rmps::from_read::<_, ErrResponse>(&mut reader)?;
+                Ok(ResponseBody::Err(x))
+            },
             _ => {
                 eprintln!("unsupported kind: '{}'", kind);
                 Err(rmps::decode::Error::OutOfRange)
@@ -160,8 +168,9 @@ impl serde::Serialize for ResponseBody {
         where S: serde::Serializer
     {
         match self {
-            ResponseBody::Chunk(x) => x.serialize(serializer),
-            ResponseBody::Listing(x) => x.serialize(serializer),
+            ResponseBody::OkWithBuffer(x) => x.serialize(serializer),
+            ResponseBody::OkWithHandle(x) => x.serialize(serializer),
+            ResponseBody::Err(x) => x.serialize(serializer),
         }
     }
 }

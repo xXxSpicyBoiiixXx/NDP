@@ -1,6 +1,8 @@
 use crate::message_kind;
 use serde::{Deserialize, Serialize};
 
+type PageHandle = u32;
+
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub struct FileInfo {
     pub name: String,
@@ -15,106 +17,126 @@ impl FileInfo {
 
 #[derive(Debug)]
 pub enum RequestBody {
-    Fetch(FileFetchRequest),
-    Listing(FileListingRequest)
+    Alloc(AllocRequest),
+    Write(WriteRequest),
+    Read(ReadRequest)
 }
 
 #[derive(Debug)]
 pub enum ResponseBody {
-    Chunk(FileChunkResponse),
-    Listing(FileListingResponse)
-}
-
-impl From<FileChunkResponse> for ResponseBody {
-    fn from(x: FileChunkResponse) -> Self {
-        ResponseBody::Chunk(x)
-    }
-}
-
-impl<'a> From<FileListingResponse> for ResponseBody {
-    fn from(x: FileListingResponse) -> Self {
-        ResponseBody::Listing(x)
-    }
-}
-
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct FileFetchRequest {
-    pub name: String,
-}
-
-impl MessageKindTagged for FileFetchRequest {
-    fn kind(&self) -> &'static str { message_kind::REQUEST_FETCH }
-}
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct FileChunkResponse {
-    pub path: String,
-    pub offset: u64,
-    pub size: u64,
-
-    #[serde(with = "serde_bytes")]
-    pub buffer: Vec<u8>,
-}
-
-impl<'a> MessageKindTagged for FileChunkResponse {
-    fn kind(&self) -> &'static str { message_kind::RESPONSE_CHUNK }
-}
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct FileListingRequest {
-    dummy: ()
-}
-
-impl MessageKindTagged for FileListingRequest {
-    fn kind(&self) -> &'static str { message_kind::REQUEST_LISTING }
-}
-
-impl FileListingRequest {
-    pub fn new() -> FileListingRequest {
-        FileListingRequest { dummy: () }
-    }
-}
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct DhtAddNodeRequest {
-    pub files: Vec<FileInfo>,
-}
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct DhtAddNodeResponse {
-    dummy: (),
-}
-
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct DhtRemoveNodeRequest {
-    pub files: Vec<FileInfo>,
-}
-
-
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct FileListingResponse {
-    pub files: Vec<FileInfo>,
-}
-
-impl MessageKindTagged for FileListingResponse {
-    fn kind(&self) -> &'static str {
-        message_kind::RESPONSE_LISTING
-    }
+    OkWithHandle(OkWithHandleResponse),
+    OkWithBuffer(OkWithBufferResponse),
+    Err(ErrResponse),
 }
 
 impl<'a> MessageKindTagged for ResponseBody {
     fn kind(&self) -> &'static str {
         match self {
-            ResponseBody::Chunk(x) => x.kind(),
-            ResponseBody::Listing(x) => x.kind(),
+            ResponseBody::OkWithBuffer(x) => x.kind(),
+            ResponseBody::OkWithHandle(x) => x.kind(),
+            ResponseBody::Err(x) => x.kind(),
         }
     }
 }
 
-pub trait MessageKindTagged {
-    fn kind(&self) -> &'static str;
+impl From<OkWithHandleResponse> for ResponseBody {
+    fn from(x: OkWithHandleResponse) -> Self {
+        ResponseBody::OkWithHandle(x)
+    }
+}
+
+impl<'a> From<OkWithBufferResponse> for ResponseBody {
+    fn from(x: OkWithBufferResponse) -> Self {
+        ResponseBody::OkWithBuffer(x)
+    }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct AllocRequest {
+    pub size: u64,
+}
+
+impl MessageKindTagged for AllocRequest {
+    fn kind(&self) -> &'static str { message_kind::REQUEST_ALLOC }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct WriteRequest {
+    pub handle: PageHandle,
+    pub offset: u64,
+
+    #[serde(with = "serde_bytes")]
+    pub buf: Vec<u8>
+}
+
+impl MessageKindTagged for WriteRequest {
+    fn kind(&self) -> &'static str { message_kind::REQUEST_WRITE }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct ReadRequest {
+    pub handle: PageHandle,
+    pub offset: u64,
+    pub len: u64,
+}
+
+impl MessageKindTagged for ReadRequest {
+    fn kind(&self) -> &'static str { message_kind::REQUEST_READ }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct OkWithHandleResponse {
+    pub handle: PageHandle
+}
+
+impl<'a> MessageKindTagged for OkWithHandleResponse {
+    fn kind(&self) -> &'static str { message_kind::RESPONSE_OK_HANDLE }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct OkWithBufferResponse {
+    pub handle: PageHandle,
+    pub offset: u64,
+
+    #[serde(with = "serde_bytes")]
+    pub buf: Vec<u8>
+}
+
+impl<'a> MessageKindTagged for OkWithBufferResponse {
+    fn kind(&self) -> &'static str { message_kind::RESPONSE_OK_HANDLE }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub enum ErrorStatus {
+    Unknown,
+    InvalidHandle,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct ErrResponse {
+    pub error: ErrorStatus,
+    pub message: String,
+}
+
+impl<'a> MessageKindTagged for ErrResponse {
+    fn kind(&self) -> &'static str { message_kind::RESPONSE_ERR }
 }
 
 
+//
+
+pub trait MessageKindTagged {
+    fn kind(&self) -> &'static str;
+}
