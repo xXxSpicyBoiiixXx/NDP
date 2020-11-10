@@ -1,7 +1,7 @@
 use crate::message_kind;
 use serde::{Deserialize, Serialize};
 
-type PageHandle = u64;
+pub type PageHandle = u64;
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub struct FileInfo {

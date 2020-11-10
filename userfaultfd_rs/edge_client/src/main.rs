@@ -24,7 +24,7 @@ use bolt::buffer::BufferContext;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use bolt::codec::{MessageReader, MessageEncoder};
-use bolt::messages::ResponseBody;
+use bolt::messages::{ResponseBody, PageHandle};
 use snafu::{Snafu, ResultExt};
 use log::{trace, debug, info, error};
 use tokio::task::block_in_place;
@@ -66,7 +66,7 @@ enum CommandError {
     DownloadIoError { source: std::io::Error },
 }
 
-async fn alloc_example() -> Result<(), CommandError> {
+async fn alloc_example() -> Result<PageHandle, CommandError> {
     let mut ctx = BufferContext::new(8 * 1024);
 
     let address = "127.0.0.1:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
@@ -86,14 +86,14 @@ async fn alloc_example() -> Result<(), CommandError> {
         .context(ReceiveError)?;
 
     debug!("client got {:?}", resp_any);
-    if let ResponseBody::OkWithHandle(resp) = resp_any {
-        println!("got handle id = {}", resp.handle);
+    return if let ResponseBody::OkWithHandle(resp) = resp_any {
+        let handle = resp.handle;
+        println!("got handle id = {}", handle);
+        Ok(handle)
     } else {
         let err = BadResponseError { reason: format!("Expected 'OkWithHandle' but got '{:?}'", resp_any) };
-        return err.fail().map_err(|x| x.into())
+        err.fail().map_err(|x| x.into())
     }
-
-    Ok(())
 }
 
 
@@ -231,7 +231,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let result =  response_buf.read_i64::<NativeEndian>().unwrap();
     println!("user  ! fib({}) = {}", fib_n, result);
 
-    alloc_example().await.unwrap();
+    //
+
+    let handle = alloc_example().await.unwrap();
 
     Ok(())
 }
