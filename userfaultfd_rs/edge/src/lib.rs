@@ -32,6 +32,7 @@ pub mod util {
     use nix::unistd::{sysconf, SysconfVar};
     use nix::sys::mman::{mmap, ProtFlags, MapFlags};
     use std::ptr::null_mut;
+    use libc::c_void;
 
     pub fn page_size() -> usize {
         let raw = sysconf(SysconfVar::PAGE_SIZE)
@@ -43,6 +44,14 @@ pub mod util {
         }
 
         raw as usize
+    }
+
+
+    pub fn page_align_mut(ptr: *mut c_void, page_size: usize) -> *mut c_void {
+        // equivalent to
+        // #define PAGE_ALIGN(X, SIZE) ((X) & ~(SIZE - 1))
+        //
+        (ptr as usize & !(page_size as usize - 1)) as *mut c_void
     }
 }
 
@@ -70,6 +79,13 @@ impl MappedBufMut {
         };
 
         Ok(MappedBufMut { ptr, len: size, page_size })
+    }
+
+    pub fn with_size(size: usize) -> nix::Result<MappedBufMut> {
+        let page_size = util::page_size();
+        let incr: usize = if (size % page_size) > 0 { 1 } else { 0 };
+        let num_pages = (size / page_size) + incr;
+        Self::with_num_pages_of_size(num_pages, page_size)
     }
 
     pub fn ptr(&self) -> *const libc::c_void {
@@ -154,7 +170,7 @@ impl Clone for FaultHandlerMemory {
 }
 
 pub struct FnRegistrations {
-    slots: Vec<*const fn()>,
+    slots: Vec<usize>,
 }
 
 unsafe impl Send for FnRegistrations { }
@@ -164,7 +180,7 @@ pub type FnSlotId = u32;
 impl FnRegistrations {
     pub fn with_max_registrations(max_registrations: FnSlotId) -> FnRegistrations {
         let mut v = Vec::new();
-        v.resize(max_registrations as usize, ptr::null());
+        v.resize(max_registrations as usize, 0);
         FnRegistrations {
             slots: v,
         }
@@ -174,15 +190,16 @@ impl FnRegistrations {
         if (slot as usize) >= self.slots.len() {
             panic!("Function slot out of range");
         }
-        self.slots[slot as usize] = unsafe { std::mem::transmute::<extern "C" fn(T) -> R, *const fn()>(handler) };
+        self.slots[slot as usize] = unsafe { std::mem::transmute::<extern "C" fn(T) -> R, usize>(handler) };
     }
 
     pub fn handler_at(&self, slot: FnSlotId) -> Option<*const fn()> {
         let handler = self.slots[slot as usize];
-        if handler == ptr::null() {
+        if handler == 0 {
             return None;
         }
-        Some(handler)
+        let f = unsafe { std::mem::transmute::<usize, *const fn()>(handler) };
+        Some(f)
     }
 }
 

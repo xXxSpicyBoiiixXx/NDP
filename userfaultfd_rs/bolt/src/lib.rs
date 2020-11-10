@@ -21,6 +21,7 @@ pub mod message_kind {
     pub const REQUEST_ALLOC: &str = "ALLOC";
     pub const REQUEST_WRITE: &str = "WRITE";
     pub const REQUEST_READ: &str = "READ";
+    pub const REQUEST_INVOKE: &str = "CALL";
     pub const RESPONSE_OK_HANDLE: &str = "OK_H";
     pub const RESPONSE_OK_BUFFER: &str = "OK_B";
     pub const RESPONSE_ERR: &str = "ERR";

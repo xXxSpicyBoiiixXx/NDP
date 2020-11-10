@@ -95,7 +95,7 @@ impl MessageDecoder for RequestBody {
     }
 }
 
-impl MessageDecoder for ResponseBody {
+impl<'a> MessageDecoder for ResponseBody {
     type Message = Self;
     type Error = rmps::decode::Error;
 
@@ -138,6 +138,7 @@ pub trait MessageEncoder {
     async fn write_to<'a, S: AsyncWriteExt + Unpin + Send>(self, stream: S) -> Result<(), Box<dyn std::error::Error>>;
 }
 
+
 #[async_trait]
 impl<M> MessageEncoder for M
     where M: MessageKindTagged + Serialize + Send + Sized
@@ -163,7 +164,7 @@ impl<M> MessageEncoder for M
     }
 }
 
-impl serde::Serialize for ResponseBody {
+impl<'a> serde::Serialize for ResponseBody {
     fn serialize<S>(&self, serializer: S) -> Result<<S as serde::Serializer>::Ok, <S as serde::Serializer>::Error>
         where S: serde::Serializer
     {

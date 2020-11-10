@@ -1,28 +1,101 @@
+extern crate rmp_serde as rmps;
+
+use std::env;
+use std::os::unix::io::AsRawFd;
+use std::ptr;
+use std::error::Error;
+use std::sync::Arc;
+use std::clone::Clone;
+use std::borrow::{BorrowMut, Borrow};
+use std::cell::RefCell;
+use std::thread;
+use std::convert::TryInto;
+use std::io::Cursor;
+
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use nix::unistd::{sysconf, SysconfVar};
 use libc::{self, c_void};
-use std::env;
-use std::os::unix::io::AsRawFd;
-use std::ptr;
-use userfaultfd::{Event, Uffd, UffdBuilder};
-use edge::{FaultHandlerMemory, FaultHandlerMemorySpec, FaultRegistration, FnRegistrations, FnSlotId, MappedBufMut};
-use std::error::Error;
-use std::sync::Arc;
-use std::clone::Clone;
-use std::borrow::BorrowMut;
-use std::cell::RefCell;
-use std::thread;
-use std::convert::TryInto;
-use byteorder::{WriteBytesExt, NativeEndian, ReadBytesExt};
-use std::io::Cursor;
 
-fn page_align_mut(ptr: *mut c_void, page_size: usize) -> *mut c_void {
-    // equivalent to
-    // #define PAGE_ALIGN(X, SIZE) ((X) & ~(SIZE - 1))
-    //
-    (ptr as usize & !(page_size as usize - 1)) as *mut c_void
+use userfaultfd::{Event, Uffd, UffdBuilder};
+use byteorder::{WriteBytesExt, NativeEndian, ReadBytesExt};
+use edge::{FaultHandlerMemory, FaultHandlerMemorySpec, FaultRegistration, FnRegistrations, FnSlotId, MappedBufMut, util};
+use bolt::buffer::BufferContext;
+use std::net::SocketAddr;
+use tokio::net::TcpStream;
+use bolt::codec::{MessageReader, MessageEncoder};
+use bolt::messages::ResponseBody;
+use snafu::{Snafu, ResultExt};
+use log::{trace, debug, info, error};
+use tokio::task::block_in_place;
+use tokio::runtime::Runtime;
+
+#[derive(Debug, Snafu)]
+enum CommandError {
+    #[snafu(display("Bad argument to command: {}", reason))]
+    BadArgument { reason: String },
+
+    #[snafu(display("Failed to parse address: {}", source))]
+    BadAddressFormat { source: std::net::AddrParseError },
+
+    #[snafu(display("Unable to resolve address: {}", source))]
+    AddressResolveFailed { source: std::io::Error },
+
+    #[snafu(display("No addresses were associated with the host"))]
+    NoAddressFound,
+
+    #[snafu(display("No file path was specified in the URL"))]
+    UrlMissingPath,
+
+    #[snafu(display("Failed to connect to remote host: {}", source))]
+    ConnectionError { source: std::io::Error },
+
+    #[snafu(display("Failed to send message to remote host: {}", source))]
+    SendError { source: std::io::Error },
+
+    #[snafu(display("Failed to receive message to remote host: {}", source))]
+    ReceiveError { source: bolt::codec::MessageReadError<rmps::decode::Error> },
+
+    #[snafu(display("Failed to encode message: {}", source))]
+    MessageEncodingError { source: Box<dyn std::error::Error> },
+
+    #[snafu(display("Response was invalid or unexpected: {}", reason))]
+    BadResponseError { reason: String },
+
+    #[snafu(display("Unable to write to download file: {}", source))]
+    DownloadIoError { source: std::io::Error },
 }
+
+async fn alloc_example() -> Result<(), CommandError> {
+    let mut ctx = BufferContext::new(8 * 1024);
+
+    let address = "127.0.0.1:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
+
+    let mut client = TcpStream::connect(address).await
+        .context(ConnectionError)?;
+
+    let peer_address = client.borrow().peer_addr().ok();
+
+    let req = bolt::messages::AllocRequest { size: 4096, };
+    req.write_to(&mut client).await
+        .context(MessageEncodingError)?;
+    info!("[client] sent request");
+
+    info!("[client] waiting on response...");
+    let resp_any = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+        .context(ReceiveError)?;
+
+    debug!("client got {:?}", resp_any);
+    if let ResponseBody::OkWithHandle(resp) = resp_any {
+        println!("got handle id = {}", resp.handle);
+    } else {
+        let err = BadResponseError { reason: format!("Expected 'OkWithHandle' but got '{:?}'", resp_any) };
+        return err.fail().map_err(|x| x.into())
+    }
+
+    Ok(())
+}
+
 
 fn fault_handler_thread(mut ctx: ResolverContext) {
     let page_size = ctx.faulting.mem.page_size;
@@ -34,15 +107,6 @@ fn fault_handler_thread(mut ctx: ResolverContext) {
         // See what poll() tells us about the userfaultfd
         let pollfd = PollFd::new(uffd.as_raw_fd(), PollFlags::POLLIN);
         let nready = poll(&mut [pollfd], -1).expect("poll");
-
-        // println!("\nfault_handler_thread():");
-        // let revents = pollfd.revents().unwrap();
-        // println!(
-        //     "    poll() returns: nready = {}; POLLIN = {}; POLLERR = {}",
-        //     nready,
-        //     revents.contains(PollFlags::POLLIN),
-        //     revents.contains(PollFlags::POLLERR),
-        // );
 
         // Read event from file descriptor
         let event = ctx.faulting.uffd
@@ -92,7 +156,7 @@ impl ResolverContext {
     }
 
     pub unsafe fn respond_with_wake(&self, faulting_addr: *mut c_void, resolved: &MappedBufMut) -> userfaultfd::Result<usize> {
-        let faulting_page_addr = page_align_mut(faulting_addr, self.faulting.mem.page_size);
+        let faulting_page_addr = util::page_align_mut(faulting_addr, self.faulting.mem.page_size);
         self.faulting.uffd.copy(resolved.ptr(), faulting_page_addr, resolved.len(), true)
     }
 }
@@ -139,7 +203,9 @@ extern "C" fn fib_kernel(n: u32) -> i64 {
     n2
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    pretty_env_logger::init();
 
     let mem_spec = FaultHandlerMemorySpec {
         num_invoke_pages: 1,
@@ -164,6 +230,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut response_buf = ctx.mem.response_buf.as_cursor();
     let result =  response_buf.read_i64::<NativeEndian>().unwrap();
     println!("user  ! fib({}) = {}", fib_n, result);
+
+    alloc_example().await.unwrap();
 
     Ok(())
 }

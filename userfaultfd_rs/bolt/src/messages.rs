@@ -1,7 +1,7 @@
 use crate::message_kind;
 use serde::{Deserialize, Serialize};
 
-type PageHandle = u32;
+type PageHandle = u64;
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub struct FileInfo {
@@ -19,8 +19,22 @@ impl FileInfo {
 pub enum RequestBody {
     Alloc(AllocRequest),
     Write(WriteRequest),
-    Read(ReadRequest)
+    Read(ReadRequest),
+    Invoke(InvokeRequest),
 }
+
+impl<'a> MessageKindTagged for RequestBody {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Alloc(x) => x.kind(),
+            Self::Write(x) => x.kind(),
+            Self::Read(x) => x.kind(),
+            Self::Invoke(x) => x.kind(),
+        }
+    }
+}
+
+//
 
 #[derive(Debug)]
 pub enum ResponseBody {
@@ -32,14 +46,16 @@ pub enum ResponseBody {
 impl<'a> MessageKindTagged for ResponseBody {
     fn kind(&self) -> &'static str {
         match self {
-            ResponseBody::OkWithBuffer(x) => x.kind(),
-            ResponseBody::OkWithHandle(x) => x.kind(),
-            ResponseBody::Err(x) => x.kind(),
+            Self::OkWithBuffer(x) => x.kind(),
+            Self::OkWithHandle(x) => x.kind(),
+            Self::Err(x) => x.kind(),
         }
     }
 }
 
-impl From<OkWithHandleResponse> for ResponseBody {
+//
+
+impl<'a> From<OkWithHandleResponse> for ResponseBody {
     fn from(x: OkWithHandleResponse) -> Self {
         ResponseBody::OkWithHandle(x)
     }
@@ -93,6 +109,17 @@ impl MessageKindTagged for ReadRequest {
 //
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
+pub struct InvokeRequest {
+    pub handle: PageHandle,
+}
+
+impl MessageKindTagged for InvokeRequest {
+    fn kind(&self) -> &'static str { message_kind::REQUEST_INVOKE }
+}
+
+//
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub struct OkWithHandleResponse {
     pub handle: PageHandle
 }
@@ -109,7 +136,7 @@ pub struct OkWithBufferResponse {
     pub offset: u64,
 
     #[serde(with = "serde_bytes")]
-    pub buf: Vec<u8>
+    pub buf: Vec<u8>,
 }
 
 impl<'a> MessageKindTagged for OkWithBufferResponse {
@@ -122,6 +149,7 @@ impl<'a> MessageKindTagged for OkWithBufferResponse {
 pub enum ErrorStatus {
     Unknown,
     InvalidHandle,
+    ArgumentOutOfRange
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]

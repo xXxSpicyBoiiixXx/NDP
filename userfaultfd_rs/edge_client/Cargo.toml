@@ -11,6 +11,11 @@ libc = "0.2.80"
 nix = "0.19"
 userfaultfd = "0.2"
 byteorder = "1.3"
+tokio = { version = "0.2.22", features = ["full"] }
+snafu = "0.6"
+pretty_env_logger = "0.4"
+log = "0.4"
+rmp-serde = "0.14"
 
 edge = { path = "../edge" }
 bolt = { path = "../bolt" }
