@@ -1,5 +1,6 @@
 use crate::message_kind;
 use serde::{Deserialize, Serialize};
+use std::path::Display;
 
 pub type PageHandle = u64;
 
@@ -140,7 +141,7 @@ pub struct OkWithBufferResponse {
 }
 
 impl<'a> MessageKindTagged for OkWithBufferResponse {
-    fn kind(&self) -> &'static str { message_kind::RESPONSE_OK_HANDLE }
+    fn kind(&self) -> &'static str { message_kind::RESPONSE_OK_BUFFER }
 }
 
 //

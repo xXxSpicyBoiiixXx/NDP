@@ -123,7 +123,7 @@ async fn handle_read(read: messages::ReadRequest, client: ClientHandlerContext) 
     let page_buf = lock.deref().get(read.handle as usize);
     match page_buf {
         Some(page_buf) => {
-            if (read.offset + read.len as u64) >= (page_buf.len() as u64) {
+            if (read.offset + read.len as u64) > (page_buf.len() as u64) {
                 let mut lock = client.socket_write.lock().await;
                 let socket = lock.deref_mut();
                 let response = ErrResponse { error: ErrorStatus::ArgumentOutOfRange, message: "Offset is out of range".into() };
@@ -160,7 +160,7 @@ async fn handle_write(write: messages::WriteRequest, client: ClientHandlerContex
     let page_buf = lock.deref().get(write.handle as usize);
     match page_buf {
         Some(page_buf) => {
-            if (write.offset + write.buf.len() as u64) >= (page_buf.len() as u64) {
+            if (write.offset + write.buf.len() as u64) > (page_buf.len() as u64) {
                 let mut lock = client.socket_write.lock().await;
                 let socket = lock.deref_mut();
                 let response = ErrResponse { error: ErrorStatus::ArgumentOutOfRange, message: "Offset is out of range".into() };

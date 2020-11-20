@@ -24,11 +24,14 @@ use bolt::buffer::BufferContext;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use bolt::codec::{MessageReader, MessageEncoder};
-use bolt::messages::{ResponseBody, PageHandle};
+use bolt::messages::{ResponseBody, PageHandle, MessageKindTagged};
 use snafu::{Snafu, ResultExt};
 use log::{trace, debug, info, error};
 use tokio::task::block_in_place;
 use tokio::runtime::Runtime;
+use bytes::{BytesMut, BufMut};
+use std::fmt::Write;
+use rand::{thread_rng, RngCore};
 
 #[derive(Debug, Snafu)]
 enum CommandError {
@@ -79,21 +82,71 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
     let req = bolt::messages::AllocRequest { size: 4096, };
     req.write_to(&mut client).await
         .context(MessageEncodingError)?;
-    info!("[client] sent request");
 
-    info!("[client] waiting on response...");
+    info!("waiting on response...");
     let resp_any = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
         .context(ReceiveError)?;
 
-    debug!("client got {:?}", resp_any);
-    return if let ResponseBody::OkWithHandle(resp) = resp_any {
+    debug!("alloc got {:?}", resp_any);
+    let handle = if let ResponseBody::OkWithHandle(resp) = resp_any {
         let handle = resp.handle;
         println!("got handle id = {}", handle);
         Ok(handle)
     } else {
-        let err = BadResponseError { reason: format!("Expected 'OkWithHandle' but got '{:?}'", resp_any) };
-        err.fail().map_err(|x| x.into())
+        let err = BadResponseError { reason: format!("Wrong response type. Got '{:?}'", resp_any) };
+        return err.fail().map_err(|x| x.into());
+    }?;
+
+    let mut rand = thread_rng();
+    let mut buf = BytesMut::with_capacity(4096);
+    while buf.len() < buf.capacity() {
+        buf.put_u64(rand.next_u64())
     }
+
+    let req = bolt::messages::WriteRequest {
+        handle,
+        buf: buf.to_vec(),
+        offset: 0
+    };
+    debug!("write...");
+    req.write_to(&mut client).await.context(MessageEncodingError)?;
+
+    let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+        .context(ReceiveError)?;
+    debug!("write got {:?}", resp);
+
+    let req = bolt::messages::ReadRequest {
+        handle,
+        offset: 0,
+        len: 4096
+    };
+    debug!("read...");
+    req.write_to(&mut client).await.context(MessageEncodingError)?;
+
+    let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+        .context(ReceiveError)?;
+
+    let buf_recv = if let ResponseBody::OkWithBuffer(resp) = resp {
+        debug!("read got {} bytes", resp.buf.len());
+        Ok(resp.buf)
+    }
+    else if let ResponseBody::Err(err) = resp {
+        let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
+        return err.fail().map_err(|x| x.into());
+    }
+    else {
+        let err = BadResponseError { reason: format!("Wrong response type. Got '{}'", &resp.kind()) };
+        return err.fail().map_err(|x| x.into());
+    }?;
+
+    let check = buf.to_vec() == buf_recv.to_vec();
+    if !check {
+        error!("Fail read-write check!");
+        let err = BadResponseError { reason: format!("Bad response. Read did not match write.") };
+        return err.fail().map_err(|x| x.into());
+    }
+
+    Ok(handle)
 }
 
 
