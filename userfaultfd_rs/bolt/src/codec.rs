@@ -6,7 +6,7 @@ use snafu::{ResultExt, Snafu, OptionExt, IntoError, ensure};
 use async_trait::async_trait;
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio_util::codec::Decoder;
-use bytes::BytesMut;
+use bytes::{BytesMut, Buf};
 use rmps::{Serializer};
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +88,7 @@ impl MessageDecoder for RequestBody {
         };
 
         if let Ok(_) = result {
-            buf.split_to(reader.borrow().position() as usize);
+            buf.advance(reader.borrow().position() as usize);
         }
 
         result
@@ -124,7 +124,7 @@ impl<'a> MessageDecoder for ResponseBody {
         if let Ok(_) = result {
             let len = reader.borrow().position() as usize;
             // println!("[read] chop {} bytes", len);
-            buf.split_to(len);
+            buf.advance(len);
         }
 
         result

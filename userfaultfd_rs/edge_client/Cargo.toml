@@ -18,6 +18,8 @@ log = "0.4"
 rmp-serde = "0.14"
 bytes = "0.6"
 rand = "0.7"
+humansize = "1.1"
+futures = "0.3"
 
 edge = { path = "../edge" }
 bolt = { path = "../bolt" }

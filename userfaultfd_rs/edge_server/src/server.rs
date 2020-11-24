@@ -78,7 +78,7 @@ pub async fn run(listener: &mut TcpListener, ctx: ServerContext) -> Result<(), B
                 drop(lock);
 
                 if let Ok(body) = result {
-                    println!("[server] received from client '{}'", body.kind());
+                    // println!("[server] received from client '{}'", body.kind());
 
                     match body {
                         RequestBody::Alloc(alloc) => handle_alloc(alloc, client.clone()).await.unwrap(),

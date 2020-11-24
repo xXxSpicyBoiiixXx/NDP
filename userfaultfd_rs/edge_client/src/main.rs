@@ -32,6 +32,9 @@ use tokio::runtime::Runtime;
 use bytes::{BytesMut, BufMut};
 use std::fmt::Write;
 use rand::{thread_rng, RngCore};
+use std::time::Instant;
+use tokio::time::Duration;
+use humansize::{FileSize, file_size_opts};
 
 #[derive(Debug, Snafu)]
 enum CommandError {
@@ -148,6 +151,106 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
 
     Ok(handle)
 }
+
+
+async fn write_read_throughput() -> Result<PageHandle, CommandError> {
+    let mut ctx = BufferContext::new(32 * 1024);
+
+    let address = "192.168.50.239:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
+
+    let mut client = TcpStream::connect(address).await
+        .context(ConnectionError)?;
+
+    let peer_address = client.borrow().peer_addr().ok();
+
+    let page_size: usize = 1024 * 4096;
+    let req = bolt::messages::AllocRequest { size: page_size as u64, };
+    req.write_to(&mut client).await
+        .context(MessageEncodingError)?;
+
+    let resp_any = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+        .context(ReceiveError)?;
+
+    let handle = if let ResponseBody::OkWithHandle(resp) = resp_any {
+        Ok(resp.handle)
+    } else {
+        let err = BadResponseError { reason: format!("Wrong response type. Got '{:?}'", resp_any) };
+        return err.fail().map_err(|x| x.into());
+    }?;
+
+    let mut buf = BytesMut::with_capacity(page_size);
+
+    let num_iters = 50;
+    let mut durations = Vec::with_capacity(num_iters);
+    for _ in 0..num_iters {
+        {
+            let mut rand = thread_rng();
+            buf.clear();
+            while buf.len() < buf.capacity() {
+                buf.put_u64(rand.next_u64())
+            }
+        }
+
+        let start = Instant::now();
+
+        let req = bolt::messages::WriteRequest {
+            handle,
+            buf: buf.to_vec(),
+            offset: 0
+        };
+        req.write_to(&mut client).await.context(MessageEncodingError)?;
+
+        let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+            .context(ReceiveError)?;
+
+        let req = bolt::messages::ReadRequest {
+            handle,
+            offset: 0,
+            len: page_size as u64
+        };
+        req.write_to(&mut client).await.context(MessageEncodingError)?;
+
+        let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+            .context(ReceiveError)?;
+
+        let buf_recv = if let ResponseBody::OkWithBuffer(resp) = resp {
+            Ok(resp.buf)
+        } else if let ResponseBody::Err(err) = resp {
+            let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
+            return err.fail().map_err(|x| x.into());
+        } else {
+            let err = BadResponseError { reason: format!("Wrong response type. Got '{}'", &resp.kind()) };
+            return err.fail().map_err(|x| x.into());
+        }?;
+
+        let end = Instant::now();
+        durations.push(end - start);
+
+        let check = buf.to_vec() == buf_recv.to_vec();
+        if !check {
+            error!("Fail read-write check!");
+            let err = BadResponseError { reason: format!("Bad response. Read did not match write.") };
+            return err.fail().map_err(|x| x.into());
+        }
+    }
+
+    // for x in durations.iter() {
+    //     println!("{}", x.as_nanos());
+    // }
+
+    let sum: Duration = durations.iter().sum();
+    let total_bytes = num_iters * page_size;
+    let total_secs = sum.as_secs_f64();
+    let speed = ((total_bytes as f64) / total_secs) as u64;
+    println!("{} in {:.4} s (~{} / sec)",
+             total_bytes.file_size(file_size_opts::BINARY).unwrap(),
+             total_secs,
+             speed.file_size(file_size_opts::BINARY).unwrap(),
+    );
+
+    Ok(handle)
+}
+
 
 
 fn fault_handler_thread(mut ctx: ResolverContext) {
@@ -286,7 +389,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     //
 
-    let handle = alloc_example().await.unwrap();
+    // let handle = alloc_example().await.unwrap();
+    let mut handles = Vec::new();
+    for _ in 0..4 {
+        handles.push(tokio::spawn(async { write_read_throughput().await.unwrap() }));
+    }
+    futures::future::join_all(handles).await;
 
     Ok(())
 }
