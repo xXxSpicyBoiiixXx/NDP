@@ -1,0 +1,11 @@
+Data: 613.25 MiB
+
+# of Clients: 1
+613.25 MiB in 1.8384 s (~333.58 MiB / sec)
+
+# of Clients: 2
+613.25 MiB in 3.0791 s (~199.17 MiB / sec)
+613.25 MiB in 3.0894 s (~198.50 MiB / sec)
+
+# of Clients: 4 
+Signal Killed
