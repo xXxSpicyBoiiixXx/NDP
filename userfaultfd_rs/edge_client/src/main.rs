@@ -156,14 +156,16 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
 async fn write_read_throughput() -> Result<PageHandle, CommandError> {
     let mut ctx = BufferContext::new(32 * 1024);
 
-    let address = "192.168.50.239:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
+    // Change the IP addresses for desired server hosting
+    let address = "127.0.0.1:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
 
     let mut client = TcpStream::connect(address).await
         .context(ConnectionError)?;
 
     let peer_address = client.borrow().peer_addr().ok();
 
-    let page_size: usize = 1024 * 4096;
+    //Buffer size for allocation
+    let page_size: usize = 4096*4906*16;
     let req = bolt::messages::AllocRequest { size: page_size as u64, };
     req.write_to(&mut client).await
         .context(MessageEncodingError)?;
@@ -180,7 +182,7 @@ async fn write_read_throughput() -> Result<PageHandle, CommandError> {
 
     let mut buf = BytesMut::with_capacity(page_size);
 
-    let num_iters = 50;
+    let num_iters = 1;
     let mut durations = Vec::with_capacity(num_iters);
     for _ in 0..num_iters {
         {
