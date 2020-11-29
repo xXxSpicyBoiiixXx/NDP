@@ -96,25 +96,25 @@ pub async fn run(listener: &mut TcpListener, ctx: ServerContext) -> Result<(), B
 }
 
 async fn handle_invoke(invoke: messages::InvokeRequest, client: ClientHandlerContext) -> Result<(), Box<dyn Error>> {
-    // let request_buf_handle = invoke.handle;
-    // let pages_lock = client.pages.read().await;
-    // let page_buf = pages_lock.deref().get(request_buf_handle as usize);
-    // match page_buf {
-    //     None => client.reply_bad_handle().await?,
-    //     Some(request_buf) => {
-    //         let mut input = request_buf.as_cursor();
-    //         let slot_id: u32 = input.read_u32::<NativeEndian>().unwrap();
-    //
-    //         let handler_raw = client.fns.handler_at(slot_id).expect(format!("Unhandled function slot id = {}", slot_id).as_str()); // HACK: might hang
-    //         let handle = unsafe { std::mem::transmute::<*const fn(), extern "cdecl" fn(u32) -> i64>(handler_raw) };
-    //
-    //         let arg0 = input.read_u32::<NativeEndian>().unwrap();
-    //         let result: i64 = handle(arg0);
-    //
-    //         let mut output = ctx.faulting.mem.response_buf.as_cursor();
-    //         output.write_i64::<NativeEndian>(result);
-    //     }
-    // }
+     let request_buf_handle = invoke.handle;
+     let pages_lock = client.pages.read().await;
+     let page_buf = pages_lock.deref().get(request_buf_handle as usize);
+     match page_buf {
+       None => client.reply_bad_handle().await?,
+           Some(request_buf) => {
+           let mut input = request_buf.as_cursor();
+           let slot_id: u32 = input.read_u32::<NativeEndian>().unwrap();
+
+            let handler_raw = client.fns.handler_at(slot_id).expect(format!("Unhandled function slot id = {}", slot_id).as_str()); // HACK: might hang
+            let handle = unsafe { std::mem::transmute::<*const fn(), extern "cdecl" fn(u32) -> i64>(handler_raw) };
+
+             let arg0 = input.read_u32::<NativeEndian>().unwrap();
+             let result: i64 = handle(arg0);
+
+            let mut output = ctx.faulting.mem.response_buf.as_cursor();
+            output.write_i64::<NativeEndian>(result);
+        }
+     }
     Ok(())
 }
 
