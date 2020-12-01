@@ -191,6 +191,7 @@ dependencies = [
  "pretty_env_logger",
  "rand",
  "rmp-serde",
+ "serde_bytes",
  "snafu",
  "tokio 0.2.22",
  "userfaultfd",
@@ -206,6 +207,7 @@ dependencies = [
  "edge",
  "log",
  "pretty_env_logger",
+ "serde_bytes",
  "tokio 0.2.22",
  "vec-arena",
 ]

@@ -24,17 +24,18 @@ use bolt::buffer::BufferContext;
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use bolt::codec::{MessageReader, MessageEncoder};
-use bolt::messages::{ResponseBody, PageHandle, MessageKindTagged};
+use bolt::messages::{ResponseBody, PageHandle, MessageKindTagged, ResponseBodyOwned};
 use snafu::{Snafu, ResultExt};
 use log::{trace, debug, info, error};
 use tokio::task::block_in_place;
 use tokio::runtime::Runtime;
-use bytes::{BytesMut, BufMut};
+use bytes::{BytesMut, BufMut, Buf};
 use std::fmt::Write;
 use rand::{thread_rng, RngCore};
 use std::time::Instant;
 use tokio::time::Duration;
 use humansize::{FileSize, file_size_opts};
+use std::cmp::min;
 
 #[derive(Debug, Snafu)]
 enum CommandError {
@@ -87,11 +88,11 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
         .context(MessageEncodingError)?;
 
     info!("waiting on response...");
-    let resp_any = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+    let resp_any = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
         .context(ReceiveError)?;
 
     debug!("alloc got {:?}", resp_any);
-    let handle = if let ResponseBody::OkWithHandle(resp) = resp_any {
+    let handle = if let ResponseBodyOwned::OkWithHandle(resp) = resp_any {
         let handle = resp.handle;
         println!("got handle id = {}", handle);
         Ok(handle)
@@ -106,15 +107,15 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
         buf.put_u64(rand.next_u64())
     }
 
-    let req = bolt::messages::WriteRequest {
+    let req = bolt::messages::WriteRequestRef::<'_> {
         handle,
-        buf: buf.to_vec(),
+        buf: serde_bytes::Bytes::new(buf.bytes()),
         offset: 0
     };
     debug!("write...");
     req.write_to(&mut client).await.context(MessageEncodingError)?;
 
-    let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+    let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
         .context(ReceiveError)?;
     debug!("write got {:?}", resp);
 
@@ -126,14 +127,14 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
     debug!("read...");
     req.write_to(&mut client).await.context(MessageEncodingError)?;
 
-    let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+    let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
         .context(ReceiveError)?;
 
-    let buf_recv = if let ResponseBody::OkWithBuffer(resp) = resp {
+    let buf_recv = if let ResponseBodyOwned::OkWithBuffer(resp) = resp {
         debug!("read got {} bytes", resp.buf.len());
         Ok(resp.buf)
     }
-    else if let ResponseBody::Err(err) = resp {
+    else if let ResponseBodyOwned::Err(err) = resp {
         let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
         return err.fail().map_err(|x| x.into());
     }
@@ -154,7 +155,16 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
 
 
 async fn write_read_throughput() -> Result<PageHandle, CommandError> {
-    let mut ctx = BufferContext::new(32 * 1024);
+    let mb: usize = 4096 * 256;
+    let gb: usize = 4096 * 4096 * 64;
+    let buf_size: usize = 1 * gb;
+
+    let chunk_num_pages = 16 * 256; // MiB
+    let chunk_size: usize = chunk_num_pages * 4096;
+
+    //
+
+    let mut ctx = BufferContext::new((chunk_num_pages + 4) * 4096);
 
     // Change the IP addresses for desired server hosting
     let address = "127.0.0.1:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
@@ -165,74 +175,77 @@ async fn write_read_throughput() -> Result<PageHandle, CommandError> {
     let peer_address = client.borrow().peer_addr().ok();
 
     //Buffer size for allocation
-    let page_size: usize = 4096*4906*16;
-    let req = bolt::messages::AllocRequest { size: page_size as u64, };
+    let req = bolt::messages::AllocRequest { size: buf_size as u64, };
     req.write_to(&mut client).await
         .context(MessageEncodingError)?;
 
-    let resp_any = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
+    let resp_any = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
         .context(ReceiveError)?;
 
-    let handle = if let ResponseBody::OkWithHandle(resp) = resp_any {
+    let handle = if let ResponseBodyOwned::OkWithHandle(resp) = resp_any {
         Ok(resp.handle)
     } else {
         let err = BadResponseError { reason: format!("Wrong response type. Got '{:?}'", resp_any) };
         return err.fail().map_err(|x| x.into());
     }?;
 
-    let mut buf = BytesMut::with_capacity(page_size);
+    let mut buf = BytesMut::with_capacity(buf_size);
+    buf.resize(buf_size, 0);
 
     let num_iters = 1;
     let mut durations = Vec::with_capacity(num_iters);
     for _ in 0..num_iters {
         {
             let mut rand = thread_rng();
-            buf.clear();
-            while buf.len() < buf.capacity() {
-                buf.put_u64(rand.next_u64())
-            }
+            rand.fill_bytes(&mut buf);
         }
 
-        let start = Instant::now();
+        for i in (0..buf_size).step_by(chunk_size) {
+            let start = Instant::now();
 
-        let req = bolt::messages::WriteRequest {
-            handle,
-            buf: buf.to_vec(),
-            offset: 0
-        };
-        req.write_to(&mut client).await.context(MessageEncodingError)?;
+            // debug!("write {}", i);
+            let j = min(i + chunk_size, buf_size);
+            let chunk = &buf[i..j];
+            let req = bolt::messages::WriteRequestRef {
+                handle,
+                buf: chunk,
+                offset: i as u64,
+            };
+            req.write_to(&mut client).await.context(MessageEncodingError)?;
 
-        let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
-            .context(ReceiveError)?;
+            let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
+                .context(ReceiveError)?;
 
-        let req = bolt::messages::ReadRequest {
-            handle,
-            offset: 0,
-            len: page_size as u64
-        };
-        req.write_to(&mut client).await.context(MessageEncodingError)?;
+            // debug!("read {}", i);
+            let req = bolt::messages::ReadRequest {
+                handle,
+                offset: i as u64,
+                len: (j - i) as u64
+            };
+            req.write_to(&mut client).await.context(MessageEncodingError)?;
 
-        let resp = client.borrow_mut().read_next::<ResponseBody>(&mut ctx, peer_address).await
-            .context(ReceiveError)?;
+            let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
+                .context(ReceiveError)?;
 
-        let buf_recv = if let ResponseBody::OkWithBuffer(resp) = resp {
-            Ok(resp.buf)
-        } else if let ResponseBody::Err(err) = resp {
-            let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
-            return err.fail().map_err(|x| x.into());
-        } else {
-            let err = BadResponseError { reason: format!("Wrong response type. Got '{}'", &resp.kind()) };
-            return err.fail().map_err(|x| x.into());
-        }?;
+            let chunk_recv = if let ResponseBodyOwned::OkWithBuffer(resp) = resp {
+                Ok(resp.buf)
+            } else if let ResponseBodyOwned::Err(err) = resp {
+                let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
+                return err.fail().map_err(|x| x.into());
+            } else {
+                let err = BadResponseError { reason: format!("Wrong response type. Got '{}'", &resp.kind()) };
+                return err.fail().map_err(|x| x.into());
+            }?;
 
-        let end = Instant::now();
-        durations.push(end - start);
+            let end = Instant::now();
+            durations.push(end - start);
 
-        let check = buf.to_vec() == buf_recv.to_vec();
-        if !check {
-            error!("Fail read-write check!");
-            let err = BadResponseError { reason: format!("Bad response. Read did not match write.") };
-            return err.fail().map_err(|x| x.into());
+            let check = chunk == chunk_recv;
+            if !check {
+                error!("Fail read-write check!");
+                let err = BadResponseError { reason: format!("Bad response. Read did not match write.") };
+                return err.fail().map_err(|x| x.into());
+            }
         }
     }
 
@@ -241,7 +254,7 @@ async fn write_read_throughput() -> Result<PageHandle, CommandError> {
     // }
 
     let sum: Duration = durations.iter().sum();
-    let total_bytes = num_iters * page_size;
+    let total_bytes = num_iters * buf_size;
     let total_secs = sum.as_secs_f64();
     let speed = ((total_bytes as f64) / total_secs) as u64;
     println!("{} in {:.4} s (~{} / sec)",
@@ -255,10 +268,10 @@ async fn write_read_throughput() -> Result<PageHandle, CommandError> {
 
 
 
-fn fault_handler_thread(mut ctx: ResolverContext) {
+fn fault_handler_thread(ctx: ResolverContext) {
     let page_size = ctx.faulting.mem.page_size;
     let num_response_pages = ctx.faulting.mem.response_buf.num_pages();
-    let mut tmp = MappedBufMut::with_num_pages_of_size(num_response_pages, page_size).unwrap();
+    let tmp = MappedBufMut::with_num_pages_of_size(num_response_pages, page_size).unwrap();
 
     let uffd = &*ctx.faulting.uffd;
     loop {
@@ -283,7 +296,7 @@ fn fault_handler_thread(mut ctx: ResolverContext) {
             let result: i64 = handle(arg0);
 
             let mut output = ctx.faulting.mem.response_buf.as_cursor();
-            output.write_i64::<NativeEndian>(result);
+            output.write_i64::<NativeEndian>(result).expect("Failed to write value");
 
             let _num_copied = unsafe {
                 ctx.respond_with_wake(faulting_addr, &tmp)
@@ -379,8 +392,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let fib_n = 10;
     let mut request_buf = ctx.mem.request_buf.as_cursor();
-    request_buf.write_u32::<NativeEndian>(EDGE_FIB_SLOT);
-    request_buf.write_u32::<NativeEndian>(fib_n);
+    request_buf.write_u32::<NativeEndian>(EDGE_FIB_SLOT)?;
+    request_buf.write_u32::<NativeEndian>(fib_n)?;
 
     let ptr = (*ctx.mem.invoke_buf).ptr_mut() as *mut u8;
     let _poke = unsafe { *ptr };

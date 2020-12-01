@@ -29,6 +29,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("listening on {}", &listen_address);
 
     let ctx = ServerContext::with_capacity(1024, 128);
-    server::run(&mut listener, ctx).await;
+    server::run(&mut listener, ctx).await?;
     Ok(())
 }

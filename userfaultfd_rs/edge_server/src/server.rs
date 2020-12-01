@@ -1,19 +1,21 @@
+use std::sync::{Arc};
+use std::io::{Write, Read};
+use std::ops::{DerefMut, Deref};
+use std::error::Error;
+
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, RwLock};
-use std::sync::{Arc};
+use tokio::task;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
+use vec_arena::Arena;
+use byteorder::{ReadBytesExt, NativeEndian};
+
+use edge::{MappedBufMut, FnRegistrations};
 use bolt::buffer::BufferContext;
-use std::ops::{DerefMut, Deref};
+use bolt::messages::{RequestBody, OkWithHandleResponse, ErrResponse, ErrorStatus, MessageKindTagged, OkWithBufferResponse, RequestBodyOwned};
+use bolt::messages::ResponseBody::OkWithHandle;
 use bolt::codec::{MessageReader, MessageEncoder};
 use bolt::messages;
-use tokio::task;
-use bolt::messages::{RequestBody, OkWithHandleResponse, ErrResponse, ErrorStatus, MessageKindTagged, OkWithBufferResponse};
-use edge::{MappedBufMut, FnRegistrations};
-use vec_arena::Arena;
-use bolt::messages::ResponseBody::OkWithHandle;
-use std::io::{Write, Read};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use std::error::Error;
-use byteorder::{ReadBytesExt, NativeEndian};
 
 pub struct ServerContext {
     pages: Arc<RwLock<Arena<MappedBufMut>>>,
@@ -74,20 +76,20 @@ pub async fn run(listener: &mut TcpListener, ctx: ServerContext) -> Result<(), B
             let mut buf_ctx = BufferContext::new(32 * 1024);
             loop {
                 let mut lock = client.socket_read.lock().await;
-                let result = lock.deref_mut().read_next::<messages::RequestBody>(&mut buf_ctx, peer_address.into()).await;
+                let result = lock.deref_mut().read_next::<messages::RequestBodyOwned>(&mut buf_ctx, peer_address.into()).await;
                 drop(lock);
 
                 if let Ok(body) = result {
                     // println!("[server] received from client '{}'", body.kind());
 
                     match body {
-                        RequestBody::Alloc(alloc) => handle_alloc(alloc, client.clone()).await.unwrap(),
-                        RequestBody::Write(write) => handle_write(write, client.clone()).await.unwrap(),
-                        RequestBody::Read(read) => handle_read(read, client.clone()).await.unwrap(),
-                        RequestBody::Invoke(invoke) => handle_invoke(invoke, client.clone()).await.unwrap(),
+                        RequestBodyOwned::Alloc(alloc) => handle_alloc(alloc, client.clone()).await.unwrap(),
+                        RequestBodyOwned::Write(write) => handle_write(write, client.clone()).await.unwrap(),
+                        RequestBodyOwned::Read(read) => handle_read(read, client.clone()).await.unwrap(),
+                        RequestBodyOwned::Invoke(invoke) => handle_invoke(invoke, client.clone()).await.unwrap(),
                     }
                 } else {
-                    println!("[server] shutdown client handler");
+                    println!("[server] shutdown client handler: {:?}", result);
                     break;
                 }
             }
@@ -96,25 +98,27 @@ pub async fn run(listener: &mut TcpListener, ctx: ServerContext) -> Result<(), B
 }
 
 async fn handle_invoke(invoke: messages::InvokeRequest, client: ClientHandlerContext) -> Result<(), Box<dyn Error>> {
-     let request_buf_handle = invoke.handle;
-     let pages_lock = client.pages.read().await;
-     let page_buf = pages_lock.deref().get(request_buf_handle as usize);
-     match page_buf {
-       None => client.reply_bad_handle().await?,
-           Some(request_buf) => {
-           let mut input = request_buf.as_cursor();
-           let slot_id: u32 = input.read_u32::<NativeEndian>().unwrap();
+    let request_buf_handle = invoke.handle;
+    let pages_lock = client.pages.read().await;
+    let page_buf = pages_lock.deref().get(request_buf_handle as usize);
+    match page_buf {
+        None => client.reply_bad_handle().await?,
+        Some(request_buf) => {
+            let mut input = request_buf.as_cursor();
+            let slot_id: u32 = input.read_u32::<NativeEndian>().unwrap();
 
-            let handler_raw = client.fns.handler_at(slot_id).expect(format!("Unhandled function slot id = {}", slot_id).as_str()); // HACK: might hang
+            let fns = client.fns.read().await;
+            let handler_raw = fns.handler_at(slot_id).expect(format!("Unhandled function slot id = {}", slot_id).as_str()); // HACK: might hang
             let handle = unsafe { std::mem::transmute::<*const fn(), extern "cdecl" fn(u32) -> i64>(handler_raw) };
 
-             let arg0 = input.read_u32::<NativeEndian>().unwrap();
-             let result: i64 = handle(arg0);
+            let arg0 = input.read_u32::<NativeEndian>().unwrap();
+            let result: i64 = handle(arg0);
 
-            let mut output = ctx.faulting.mem.response_buf.as_cursor();
-            output.write_i64::<NativeEndian>(result);
+            // TODO: Response buf?
+            // let mut output = client.faulting.mem.response_buf.as_cursor();
+            // output.write_i64::<NativeEndian>(result);
         }
-     }
+    }
     Ok(())
 }
 
@@ -135,7 +139,7 @@ async fn handle_read(read: messages::ReadRequest, client: ClientHandlerContext) 
             output.resize(read.len as usize, 0);
             let mut page_cursor = page_buf.as_cursor();
             page_cursor.set_position(read.offset);
-            page_cursor.read_exact(output.as_mut_slice());
+            page_cursor.read_exact(output.as_mut_slice())?;
 
             {
                 let mut lock = client.socket_write.lock().await;
@@ -143,7 +147,7 @@ async fn handle_read(read: messages::ReadRequest, client: ClientHandlerContext) 
                 let response = OkWithBufferResponse {
                     handle: read.handle,
                     offset: read.offset,
-                    buf: output,
+                    buf: &output,
                 };
                 response.write_to(socket).await?;
             }
@@ -155,7 +159,7 @@ async fn handle_read(read: messages::ReadRequest, client: ClientHandlerContext) 
 }
 
 
-async fn handle_write(write: messages::WriteRequest, client: ClientHandlerContext) -> Result<(), Box<dyn Error>> {
+async fn handle_write(write: messages::WriteRequestOwned, client: ClientHandlerContext) -> Result<(), Box<dyn Error>> {
     let lock = client.pages.read().await;
     let page_buf = lock.deref().get(write.handle as usize);
     match page_buf {
@@ -170,7 +174,7 @@ async fn handle_write(write: messages::WriteRequest, client: ClientHandlerContex
 
             let mut page_cursor = page_buf.as_cursor();
             page_cursor.set_position(write.offset);
-            page_cursor.write(write.buf.as_slice());
+            page_cursor.write(&write.buf)?;
 
             {
                 let mut lock = client.socket_write.lock().await;

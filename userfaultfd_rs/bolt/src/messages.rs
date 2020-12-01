@@ -17,14 +17,33 @@ impl FileInfo {
 }
 
 #[derive(Debug)]
-pub enum RequestBody {
+pub enum RequestBody<'a> {
     Alloc(AllocRequest),
-    Write(WriteRequest),
+    Write(WriteRequestRef<'a>),
     Read(ReadRequest),
     Invoke(InvokeRequest),
 }
 
-impl<'a> MessageKindTagged for RequestBody {
+#[derive(Debug)]
+pub enum RequestBodyOwned {
+    Alloc(AllocRequest),
+    Write(WriteRequestOwned),
+    Read(ReadRequest),
+    Invoke(InvokeRequest),
+}
+
+impl<'a> MessageKindTagged for RequestBody<'a> {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Alloc(x) => x.kind(),
+            Self::Write(x) => x.kind(),
+            Self::Read(x) => x.kind(),
+            Self::Invoke(x) => x.kind(),
+        }
+    }
+}
+
+impl MessageKindTagged for RequestBodyOwned {
     fn kind(&self) -> &'static str {
         match self {
             Self::Alloc(x) => x.kind(),
@@ -38,13 +57,30 @@ impl<'a> MessageKindTagged for RequestBody {
 //
 
 #[derive(Debug)]
-pub enum ResponseBody {
+pub enum ResponseBody<'a> {
     OkWithHandle(OkWithHandleResponse),
-    OkWithBuffer(OkWithBufferResponse),
+    OkWithBuffer(OkWithBufferResponse<'a>),
     Err(ErrResponse),
 }
 
-impl<'a> MessageKindTagged for ResponseBody {
+#[derive(Debug)]
+pub enum ResponseBodyOwned {
+    OkWithHandle(OkWithHandleResponse),
+    OkWithBuffer(OkWithBufferResponseOwned),
+    Err(ErrResponse),
+}
+
+impl<'a> MessageKindTagged for ResponseBody<'a> {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::OkWithBuffer(x) => x.kind(),
+            Self::OkWithHandle(x) => x.kind(),
+            Self::Err(x) => x.kind(),
+        }
+    }
+}
+
+impl<'a> MessageKindTagged for ResponseBodyOwned {
     fn kind(&self) -> &'static str {
         match self {
             Self::OkWithBuffer(x) => x.kind(),
@@ -56,14 +92,14 @@ impl<'a> MessageKindTagged for ResponseBody {
 
 //
 
-impl<'a> From<OkWithHandleResponse> for ResponseBody {
+impl<'a> From<OkWithHandleResponse> for ResponseBody<'a> {
     fn from(x: OkWithHandleResponse) -> Self {
         ResponseBody::OkWithHandle(x)
     }
 }
 
-impl<'a> From<OkWithBufferResponse> for ResponseBody {
-    fn from(x: OkWithBufferResponse) -> Self {
+impl<'a> From<OkWithBufferResponse<'a>> for ResponseBody<'a> {
+    fn from(x: OkWithBufferResponse<'a>) -> Self {
         ResponseBody::OkWithBuffer(x)
     }
 }
@@ -81,16 +117,29 @@ impl MessageKindTagged for AllocRequest {
 
 //
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct WriteRequest {
+#[derive(Debug, PartialEq, Serialize)]
+pub struct WriteRequestRef<'a> {
     pub handle: PageHandle,
     pub offset: u64,
 
     #[serde(with = "serde_bytes")]
-    pub buf: Vec<u8>
+    pub buf: &'a [u8],
 }
 
-impl MessageKindTagged for WriteRequest {
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct WriteRequestOwned {
+    pub handle: PageHandle,
+    pub offset: u64,
+
+    #[serde(with = "serde_bytes")]
+    pub buf: Vec<u8>,
+}
+
+impl<'a> MessageKindTagged for WriteRequestRef<'a> {
+    fn kind(&self) -> &'static str { message_kind::REQUEST_WRITE }
+}
+
+impl MessageKindTagged for WriteRequestOwned {
     fn kind(&self) -> &'static str { message_kind::REQUEST_WRITE }
 }
 
@@ -131,8 +180,17 @@ impl<'a> MessageKindTagged for OkWithHandleResponse {
 
 //
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-pub struct OkWithBufferResponse {
+#[derive(Debug, PartialEq, Serialize)]
+pub struct OkWithBufferResponse<'a> {
+    pub handle: PageHandle,
+    pub offset: u64,
+
+    #[serde(with = "serde_bytes")]
+    pub buf: &'a [u8],
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct OkWithBufferResponseOwned {
     pub handle: PageHandle,
     pub offset: u64,
 
@@ -140,7 +198,11 @@ pub struct OkWithBufferResponse {
     pub buf: Vec<u8>,
 }
 
-impl<'a> MessageKindTagged for OkWithBufferResponse {
+impl<'a> MessageKindTagged for OkWithBufferResponse<'a> {
+    fn kind(&self) -> &'static str { message_kind::RESPONSE_OK_BUFFER }
+}
+
+impl<'a> MessageKindTagged for OkWithBufferResponseOwned {
     fn kind(&self) -> &'static str { message_kind::RESPONSE_OK_BUFFER }
 }
 

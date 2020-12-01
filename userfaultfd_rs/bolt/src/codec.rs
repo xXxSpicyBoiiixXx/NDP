@@ -13,23 +13,23 @@ use serde::{Deserialize, Serialize};
 use crate::buffer::{BufferContext, BufferState};
 use crate::{message_kind, messages};
 use std::borrow::{BorrowMut, Borrow};
-use crate::messages::{ResponseBody, OkWithHandleResponse, OkWithBufferResponse, ErrResponse, MessageKindTagged, RequestBody, AllocRequest};
+use crate::messages::{ResponseBody, OkWithHandleResponse, OkWithBufferResponse, ErrResponse, MessageKindTagged, RequestBody, AllocRequest, ResponseBodyOwned, RequestBodyOwned};
 
-pub struct MessageCodec<'a, M: MessageDecoder> {
+pub struct MessageCodec<'a, M: MessageDecoder<'a>> {
     header: &'a MessageHeaderDecoded,
     decoder: PhantomData<M>,
 }
 
-impl<M: MessageDecoder> MessageCodec<'_, M> {
-    pub fn new(header: &MessageHeaderDecoded) -> MessageCodec<'_, M> {
+impl<'a, M: MessageDecoder<'a>> MessageCodec<'a, M> {
+    pub fn new(header: &'a MessageHeaderDecoded) -> MessageCodec<'a, M> {
         MessageCodec { header, decoder: Default::default() }
     }
 }
 
-impl<'a, M: MessageDecoder> Decoder for MessageCodec<'a, M>
-    where <M as MessageDecoder>::Error: std::convert::From<std::io::Error>
+impl<'a, M: MessageDecoder<'a>> Decoder for MessageCodec<'a, M>
+    where <M as MessageDecoder<'a>>::Error: std::convert::From<std::io::Error>
 {
-    type Item = M::Message;
+    type Item = M;
     type Error = M::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -59,61 +59,63 @@ impl MessageHeaderDecoded {
     }
 }
 
-pub trait MessageDecoder {
-    type Message;
+pub trait MessageDecoder<'a> {
     type Error: std::error::Error + 'static;
 
-    fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self::Message, Self::Error>;
+    fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self, Self::Error>
+        where Self: Sized;
 }
 
-impl MessageDecoder for RequestBody {
-    type Message = Self;
+impl<'a> MessageDecoder<'a> for RequestBodyOwned {
     type Error = rmps::decode::Error;
-    fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self::Message, Self::Error> {
-        let mut reader = Cursor::new(buf.clone());
+    fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self, Self::Error> {
+        let mut reader = Cursor::new(buf.bytes());
+        let mut decoder = rmps::Deserializer::new(&mut reader);
         let result = match meta.header.kind.as_str() {
             message_kind::REQUEST_ALLOC => {
-                let x = rmps::from_read::<_, messages::AllocRequest>(&mut reader)?;
-                Ok(RequestBody::Alloc(x))
+                let x = serde::Deserialize::deserialize(&mut decoder)?;
+                Ok(Self::Alloc(x))
             },
             message_kind::REQUEST_READ => {
-                let x = rmps::from_read::<_, messages::ReadRequest>(&mut reader)?;
-                Ok(RequestBody::Read(x))
+                let x = serde::Deserialize::deserialize(&mut decoder)?;
+                Ok(Self::Read(x))
             },
             message_kind::REQUEST_WRITE => {
-                let x = rmps::from_read::<_, messages::WriteRequest>(&mut reader)?;
-                Ok(RequestBody::Write(x))
+                let x = serde::Deserialize::deserialize(&mut decoder)?;
+                Ok(Self::Write(x))
             },
             _ => Err(rmps::decode::Error::OutOfRange),
         };
 
         if let Ok(_) = result {
-            buf.advance(reader.borrow().position() as usize);
+            let n = reader.position() as usize;
+            buf.advance(n);
         }
 
         result
     }
 }
 
-impl<'a> MessageDecoder for ResponseBody {
-    type Message = Self;
+impl<'a> MessageDecoder<'a> for ResponseBodyOwned {
     type Error = rmps::decode::Error;
 
-    fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self::Message, Self::Error> {
-        let mut reader = Cursor::new(buf.clone());
+    fn read_from(buf: &mut BytesMut, meta: &MessageHeaderDecoded) -> Result<Self, Self::Error> {
+        let mut reader = Cursor::new(buf.bytes());
+        let mut decoder = rmps::Deserializer::new(&mut reader);
+
         let kind = meta.header.kind.as_str();
         let result = match kind {
             message_kind::RESPONSE_OK_HANDLE => {
-                let x = rmps::from_read::<_, OkWithHandleResponse>(&mut reader)?;
-                Ok(ResponseBody::OkWithHandle(x))
+                let x = serde::Deserialize::deserialize(&mut decoder)?;
+                Ok(Self::OkWithHandle(x))
             },
             message_kind::RESPONSE_OK_BUFFER => {
-                let x = rmps::from_read::<_, OkWithBufferResponse>(&mut reader)?;
-                Ok(ResponseBody::OkWithBuffer(x))
+                let x = serde::Deserialize::deserialize(&mut decoder)?;
+                Ok(Self::OkWithBuffer(x))
             },
             message_kind::RESPONSE_ERR => {
-                let x = rmps::from_read::<_, ErrResponse>(&mut reader)?;
-                Ok(ResponseBody::Err(x))
+                let x = serde::Deserialize::deserialize(&mut decoder)?;
+                Ok(Self::Err(x))
             },
             _ => {
                 eprintln!("unsupported kind: '{}'", kind);
@@ -122,8 +124,7 @@ impl<'a> MessageDecoder for ResponseBody {
         };
 
         if let Ok(_) = result {
-            let len = reader.borrow().position() as usize;
-            // println!("[read] chop {} bytes", len);
+            let len = reader.position() as usize;
             buf.advance(len);
         }
 
@@ -164,7 +165,7 @@ impl<M> MessageEncoder for M
     }
 }
 
-impl<'a> serde::Serialize for ResponseBody {
+impl<'a> serde::Serialize for ResponseBody<'a> {
     fn serialize<S>(&self, serializer: S) -> Result<<S as serde::Serializer>::Ok, <S as serde::Serializer>::Error>
         where S: serde::Serializer
     {
@@ -190,31 +191,31 @@ pub enum MessageReadError<M: std::error::Error + 'static> {
 }
 
 #[async_trait]
-pub trait MessageReader<S: AsyncReadExt + Unpin + Send> {
-    async fn read_next<R: MessageDecoder>(
+pub trait MessageReader<'a, S: AsyncReadExt + Unpin + Send> {
+    async fn read_next<R: MessageDecoder<'a>>(
         &mut self,
         ctx: &mut BufferContext,
         peer_addr: Option<SocketAddr>)
-        -> Result<R::Message, MessageReadError<R::Error>>;
+        -> Result<R, MessageReadError<R::Error>>;
 }
 
 #[async_trait]
-impl<S: AsyncReadExt + Unpin + Send> MessageReader<S> for S {
-    async fn read_next<R: MessageDecoder>(
+impl<S: AsyncReadExt + Unpin + Send> MessageReader<'static, S> for S {
+    async fn read_next<R: MessageDecoder<'static>>(
         &mut self,
         ctx: &mut BufferContext,
         peer_addr: Option<SocketAddr>)
-        -> Result<R::Message, MessageReadError<R::Error>>
+        -> Result<R, MessageReadError<R::Error>>
     {
         read_next::<R, S>(self, ctx, peer_addr).await
     }
 }
 
-pub async fn read_next<R: MessageDecoder, S: AsyncReadExt + Unpin>(
+pub async fn read_next<R: MessageDecoder<'static>, S: AsyncReadExt + Unpin>(
     socket: &mut S,
     ctx: &mut BufferContext,
     peer_addr: Option<SocketAddr>)
-    -> Result<R::Message, MessageReadError<R::Error>>
+    -> Result<R, MessageReadError<R::Error>>
 {
     let peer_addr_str = peer_addr.map_or("(unknown)".into(), |addr| addr.to_string());
 
