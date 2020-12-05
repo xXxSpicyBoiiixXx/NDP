@@ -1,0 +1,55 @@
+Data: 512 MiB
+
+512 MiB in 3.4812 s (~147.07 MiB / sec)
+512 MiB in 3.5661 s (~143.57 MiB / sec)
+512 MiB in 3.5873 s (~142.72 MiB / sec)
+512 MiB in 3.5976 s (~142.32 MiB / sec)
+
+Average of 512MiB: 3.555625 s (~143.99 MiB / sec) 
+
+Data: 1 Gib
+
+1 GiB in 6.9388 s (~147.58 MiB / sec)
+1 GiB in 6.9514 s (~147.31 MiB / sec)
+1 GiB in 7.1165 s (~143.89 MiB / sec)
+1 GiB in 7.1741 s (~142.74 MiB / sec)
+
+Average of 1 Gib: 7.0452 s (~145.35 MiB / sec)
+
+Data: 1.5 GiB 
+
+1.50 GiB in 10.6660 s (~144.01 MiB / sec)
+1.50 GiB in 10.5422 s (~145.70 MiB / sec)
+1.50 GiB in 10.8185 s (~141.98 MiB / sec)
+1.50 GiB in 10.7855 s (~142.41 MiB / sec)
+
+Average of 1.5 GiB: 10.70305 s (~143.51 MiB / sec)
+
+Data: 2 GiB
+2 GiB in 12.5730 s (~162.89 MiB / sec)
+2 GiB in 13.1409 s (~155.85 MiB / sec)
+2 GiB in 13.2934 s (~154.06 MiB / sec)
+2 GiB in 12.8527 s (~160.19 MiB / sec)
+
+Average of 2 GiB: 12.965 s (~157.96 MiB / sec) 
+
+Data: 2.5 GiB 
+
+2.50 GiB in 15.0869 s (~169.68 MiB / sec)
+2.50 GiB in 15.0830 s (~169.73 MiB / sec)
+2.50 GiB in 15.0089 s (~170.57 MiB / sec)
+2.50 GiB in 15.0105 s (~170.55 MiB / sec)
+
+Average of 2.5 GiB: 15.047325 s (~170.13 MiB / sec)
+
+Data: 3 GiB
+
+3 GiB in 18.1667 s (~169.10 MiB / sec)
+3 GiB in 18.1718 s (~169.05 MiB / sec)
+3 GiB in 17.9554 s (~171.09 MiB / sec)
+3 GiB in 17.9895 s (~170.77 MiB / sec)
+
+Average of 3 GiB: 18.07085 s (~169.99 MiB / sec)
+
+
+
