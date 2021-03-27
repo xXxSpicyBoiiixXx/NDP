@@ -37,12 +37,17 @@ extern "C" {
 
 #define PANIC_IF_NULL(_VAR) \
     do { \
-        if ((_VAR) == NULL) { PANIC("`%s` cannot be null", "#_VAR#"); } \
+        if ((_VAR) == NULL) { PANIC("`%s` cannot be null", #_VAR); } \
     } while (0)
 
 #define PANIC_IF_ZERO(_VAR) \
     do { \
-        if ((_VAR) == 0) { PANIC("`%s` cannot be zero", "#_VAR#"); } \
+        if ((_VAR) == 0) { PANIC("`%s` cannot be zero", #_VAR); } \
+    } while (0)
+
+#define ENSURE_OR_PANIC(_VAR) \
+    do { \
+        if (!(_VAR)) { PANIC("assertion failed: `%s`", #_VAR); } \
     } while (0)
 
 #define PANIC_IF_NEG(_VAR) \
