@@ -11,8 +11,9 @@
 #include <sys/mman.h>
 #include <poll.h>
 
-#include <edge/panic.h>
 #include <cstring>
+#include <edge/panic.h>
+#include <thread>
 
 struct edge_fault_handler_ctx_t
 {
@@ -125,7 +126,12 @@ int main()
     // Create and setup `userfaultfd` object
     int32_t uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
     if (uffd < 0) {
-        PANIC("syscall(userfaultdf): failed with %d", uffd);
+        if (errno == EPERM) {
+            PANIC("userfaultfd: failed due to insufficient permissions. "
+                  "On Linux >= 5.2, ensure /proc/sys/vm/unprivileged_userfaultfd is non-zero.\n");
+        }
+
+        PANIC_WITH_ERRNO("syscall(userfaultfd)");
     }
 
     struct uffdio_api userfault_api = {

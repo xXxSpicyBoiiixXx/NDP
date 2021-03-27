@@ -10,6 +10,7 @@ target_link_libraries(ndp PRIVATE Threads::Threads)
 target_sources(ndp PRIVATE
         src/main.c
         src/mapped_buf.c
+        src/uffd.c
         )
 
 target_include_directories(ndp PRIVATE ./include)

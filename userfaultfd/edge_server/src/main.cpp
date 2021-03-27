@@ -224,8 +224,8 @@ fault_handler_thread(void *arg)
     }
 
     // Loop handling any events from the userfaultfd file descriptor
+    auto pollfd = ctx.registration().make_pollfd();
     while (true) {
-        auto pollfd = ctx.registration().make_pollfd();
         int32_t num_ready = poll(&pollfd, 1, -1);
         if (num_ready < 0) {
             PANIC("poll");
