@@ -27,15 +27,16 @@ use bolt::codec::{MessageReader, MessageEncoder};
 use bolt::messages::{ResponseBody, PageHandle, MessageKindTagged, ResponseBodyOwned};
 use snafu::{Snafu, ResultExt};
 use log::{trace, debug, info, error};
-use tokio::task::block_in_place;
+use tokio::task::{block_in_place, JoinHandle};
 use tokio::runtime::Runtime;
-use bytes::{BytesMut, BufMut, Buf};
+use bytes::{BytesMut, BufMut, Buf, Bytes};
 use std::fmt::Write;
 use rand::{thread_rng, RngCore};
 use std::time::Instant;
 use tokio::time::Duration;
 use humansize::{FileSize, file_size_opts};
 use std::cmp::min;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Snafu)]
 enum CommandError {
@@ -157,9 +158,9 @@ async fn alloc_example() -> Result<PageHandle, CommandError> {
 async fn write_read_throughput() -> Result<PageHandle, CommandError> {
     let mb: usize = 4096 * 256;
     let gb: usize = 4096 * 4096 * 64;
-    let buf_size: usize = 1 * gb;
+    let buf_size: usize = 512 * mb;
 
-    let chunk_num_pages = 16 * 256; // MiB
+    let chunk_num_pages = 64; // MiB
     let chunk_size: usize = chunk_num_pages * 4096;
 
     //
@@ -167,7 +168,7 @@ async fn write_read_throughput() -> Result<PageHandle, CommandError> {
     let mut ctx = BufferContext::new((chunk_num_pages + 4) * 4096);
 
     // Change the IP addresses for desired server hosting
-    let address = "127.0.0.1:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
+    let address = "192.168.50.239:9090".parse::<SocketAddr>().context(BadAddressFormat)?;
 
     let mut client = TcpStream::connect(address).await
         .context(ConnectionError)?;
@@ -194,58 +195,81 @@ async fn write_read_throughput() -> Result<PageHandle, CommandError> {
 
     let num_iters = 1;
     let mut durations = Vec::with_capacity(num_iters);
+
+    {
+        let mut rand = thread_rng();
+        rand.fill_bytes(&mut buf);
+    }
+
+    let (read_owned, write_owned) = client.into_split();
+    let read = Arc::new(Mutex::new(read_owned));
+    let write = Arc::new(Mutex::new(write_owned));
+
     for _ in 0..num_iters {
-        {
-            let mut rand = thread_rng();
-            rand.fill_bytes(&mut buf);
-        }
-
+        let mut jobs: Vec<JoinHandle<_>> = Vec::new();
         for i in (0..buf_size).step_by(chunk_size) {
-            let start = Instant::now();
+            jobs.push(tokio::spawn(async {
+                foo(i, chunk_size, buf_size, &buf, handle, &mut client, &mut ctx, peer_address, &mut durations).await.unwrap();
+                async fn foo(
+                    i: usize,
+                    chunk_size: usize,
+                    buf_size: usize,
+                    buf: &BytesMut,
+                    handle: PageHandle,
+                    mut client: &mut TcpStream,
+                    mut ctx: &mut BufferContext,
+                    peer_address: Option<SocketAddr>,
+                    durations: &mut Vec<Duration>,
+                ) -> Result<(), CommandError> {
+                    let start = Instant::now();
 
-            // debug!("write {}", i);
-            let j = min(i + chunk_size, buf_size);
-            let chunk = &buf[i..j];
-            let req = bolt::messages::WriteRequestRef {
-                handle,
-                buf: chunk,
-                offset: i as u64,
-            };
-            req.write_to(&mut client).await.context(MessageEncodingError)?;
+                    // debug!("write {}", i);
+                    let j = min(i + chunk_size, buf_size);
+                    let chunk = &buf[i..j];
+                    let req = bolt::messages::WriteRequestRef {
+                        handle,
+                        buf: chunk,
+                        offset: i as u64,
+                    };
+                    req.write_to(&mut client).await.context(MessageEncodingError)?;
 
-            let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
-                .context(ReceiveError)?;
+                    let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
+                        .context(ReceiveError)?;
 
-            // debug!("read {}", i);
-            let req = bolt::messages::ReadRequest {
-                handle,
-                offset: i as u64,
-                len: (j - i) as u64
-            };
-            req.write_to(&mut client).await.context(MessageEncodingError)?;
+                    // debug!("read {}", i);
+                    let req = bolt::messages::ReadRequest {
+                        handle,
+                        offset: i as u64,
+                        len: (j - i) as u64
+                    };
+                    req.write_to(&mut client).await.context(MessageEncodingError)?;
 
-            let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
-                .context(ReceiveError)?;
+                    let resp = client.borrow_mut().read_next::<ResponseBodyOwned>(&mut ctx, peer_address).await
+                        .context(ReceiveError)?;
 
-            let chunk_recv = if let ResponseBodyOwned::OkWithBuffer(resp) = resp {
-                Ok(resp.buf)
-            } else if let ResponseBodyOwned::Err(err) = resp {
-                let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
-                return err.fail().map_err(|x| x.into());
-            } else {
-                let err = BadResponseError { reason: format!("Wrong response type. Got '{}'", &resp.kind()) };
-                return err.fail().map_err(|x| x.into());
-            }?;
+                    let chunk_recv = if let ResponseBodyOwned::OkWithBuffer(resp) = resp {
+                        Ok(resp.buf)
+                    } else if let ResponseBodyOwned::Err(err) = resp {
+                        let err = BadResponseError { reason: format!("Server-side error. ({:?}) {}", err.error, err.message) };
+                        return err.fail().map_err(|x| x.into());
+                    } else {
+                        let err = BadResponseError { reason: format!("Wrong response type. Got '{}'", &resp.kind()) };
+                        return err.fail().map_err(|x| x.into());
+                    }?;
 
-            let end = Instant::now();
-            durations.push(end - start);
+                    let end = Instant::now();
+                    durations.push(end - start);
 
-            let check = chunk == chunk_recv;
-            if !check {
-                error!("Fail read-write check!");
-                let err = BadResponseError { reason: format!("Bad response. Read did not match write.") };
-                return err.fail().map_err(|x| x.into());
-            }
+                    let check = chunk == chunk_recv;
+                    if !check {
+                        error!("Fail read-write check!");
+                        let err = BadResponseError { reason: format!("Bad response. Read did not match write.") };
+                        return err.fail().map_err(|x| x.into());
+                    }
+
+                    Ok(())
+                };
+            }));
         }
     }
 
@@ -406,7 +430,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // let handle = alloc_example().await.unwrap();
     let mut handles = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..16 {
         handles.push(tokio::spawn(async { write_read_throughput().await.unwrap() }));
     }
     futures::future::join_all(handles).await;

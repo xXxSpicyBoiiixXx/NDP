@@ -13,7 +13,7 @@ int32_t create()
 {
     int32_t uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
     if (uffd < 0) {
-        PANIC("syscall(userfaultdf): failed with %d", uffd);
+        PANIC("syscall(userfaultfd): failed with %d", uffd);
     }
     return uffd;
 }
