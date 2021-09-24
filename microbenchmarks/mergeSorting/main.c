@@ -19,7 +19,7 @@ int main() {
 	printArray(sortArray, 10);
 
 	do {
-	printf("Enter placement in the array you want to replace followed by the value");
+	printf("Enter placement in the array you want to replace followed by the value ");
 	scanf("%d %d", &num1, &num2); 
 	sortArray[num1] = num2;
 	mergeSort(sortArray, 0, 9);

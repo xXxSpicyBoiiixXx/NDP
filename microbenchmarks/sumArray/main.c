@@ -1,39 +1,83 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <stdint.h>
 
-int sum(int arr[], int n) 
-{
-	int sum = 0;
+#define LIMIT 100
 
-	for(int i = 0; i < n; i++) { 
+#define DEBUG 1
+
+static void print_array(int * arr, size_t len) {
+	for (int i = 0; i < len; i++) {
+		printf("%d ", arr[i]);
+	}
+	printf("\n");
+}
+
+static uint64_t naive_sum(int * arr, size_t n) {
+	uint64_t sum = 0;
+
+	for (int i = 0; i < n; i++) { 
 		sum += arr[i];
 	}
 	return sum;
 }
 
-int main() {
-	
-	int sumArray[10];
-	
-	int i;
-		
-	int num1, num2; 
+static uint64_t smarter_sum(int * arr, size_t n) {
+	// TODO: fill me in
+	return 0;
+}
 
-	for(i = 0; i < 10; i++) {
-		sumArray[i] = rand(); 
+
+static inline void usage(char * prog) {
+	printf("Usage: %s <n>\n", prog);
+	printf("   <n>: length of array\n");
+}
+
+static inline void init_array(int * a, size_t len) {
+	for (int i = 0; i < len; i++) {
+		a[i] = rand() % LIMIT;
+	}
+}
+
+int main(int argc, char ** argv) {
+	
+	size_t len;
+	int idx, new_val; 
+	int ret = 1;
+
+	if (argc < 2) {
+		usage(argv[0]);
+		exit(EXIT_SUCCESS);
 	}
 
-	printf("Sum: %d", sum(sumArray, 10)); 
-	
-	do{ 
-	printf("Enter palce in the array you want to replace followed by the value ");
-	scanf("%d %d", &num1, &num2); 
-	sumArray[num1] = num2;
-	sum(sumArray, 10); 
-	printf("New sum: %d", sum(sumArray, 10)); 
-	}	
-	while(num1 > 0 && num1 < 9); 
+	len = atoll(argv[1]);
 
-return 0;
+	int * array = malloc(sizeof(int)*len);
+	if (!array) {
+		fprintf(stderr, "Could not allocate array\n");
+		exit(EXIT_FAILURE);
+	}
+	
+
+	init_array(array, len);
+
+
+	printf("Initial sum: %llu\n", naive_sum(array, len)); 
+	
+	do { 
+#if DEBUG==1
+		print_array(array, len);
+#endif
+		printf("Enter index in the array you want to replace followed by the value: ");
+		ret = scanf("%d %d", &idx, &new_val); 
+		array[idx % len] = new_val;
+		printf("Recomputed sum: %llu\n", naive_sum(array, len)); 
+	}	
+	while (ret != 0);
+
+	return 0;
 }
 

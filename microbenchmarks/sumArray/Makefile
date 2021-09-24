@@ -1,6 +1,6 @@
 CC = clang 
 
-CFLAG = -g -Wall -Wextra -Werror
+CFLAG = -g -O3 -Wall -Wextra -Werror
 
 all: sumArray
 
