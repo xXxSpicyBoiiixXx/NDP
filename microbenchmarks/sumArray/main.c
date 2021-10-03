@@ -6,18 +6,19 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <limits.h>
+#include "functions.h"
 
 #define LIMIT 100
 
 #define DEBUG 1
 
-struct node { 
+/*typedef struct node { 
 	int data; 
 	struct node* left; 
 	struct node* right; 
 };
 
-static struct node* newNode(int data) {
+node* newNode(int data) {
 	struct node* node = (struct node*)malloc(sizeof(struct node));
 	
 	node->data = data; 
@@ -28,61 +29,36 @@ static struct node* newNode(int data) {
 	return(node); 
 }
 
-// leaf nodes are the values of trees
-static struct createTree((int) *arr, int start_idx, int end_idx) {
-	if(start_idx == end_idx)
-		return NULL;
 
-	/*int mid_idx = (start_idx + end_idx)/2;
-	struct node *root = newNode(arr[mid_idx]);
-
-	root->left = createTree(arr, start_idx, mid_idx-1); 
-	root->right = createTree(arr, mid_idx+1, end_idx); 
-	*/
-
-	struct node *root = newNode; 
-
-	for(start_idx, start_idx < end_idx, start_idx+=2) { 
-		if(start_idx >= end_idx)
-			return NULL; 
-
-		struct node *createNode1 = newNode(arr[start_idx]); 
-		struct node *createNode2 = newNode(arr[start_idx+1]); 
+struct node *createTree(int * arr, size_t len) {
 	
-		struct node *sumNode = newNode(createNode1.data + createNode2.data); 
-		sumNode -> left = createNode1; 
-		sumNode -> right = createNode2; 
-
-	}
+	node *left_node;
+	node *right_node;
 	
+	node *summation_node; 
 	
-/*	for(int start_idx, start_idx < end_idx, start_idx++) {
+	int sum_array[len/2]; 
 	
-	struct node *createNode1 =  arr[start_idx]; 
-	// there maybe an out of index here sometime.. 
-	struct node *createNode2 =  arr[start_idx + 1];
-	 }
+	for(int i = 0, i < len, i++) { 
 		
-	root
-*/	
-	return 0; 
-}
+		leaf_node = (node*)malloc(sizeof(node)); 
+		leaf_node -> data; 
+		
+		i++; 
+		if(i != len) 
+		right_node = (node*)malloc(sizeof(node)); 
+		right_node -> data;
 
-static void print_array(int * arr, size_t len) {
-	for (int i = 0; i < len; i++) {
-		printf("%d ", arr[i]);
+		int j = i--;
+		
+		sum_array[j] = left_node + right_node;
+
 	}
-	printf("\n");
-}
 
-static uint64_t naive_sum(int * arr, size_t n) {
-	uint64_t sum = 0;
+	createTree(sum_array, size_t len/2); 
 
-	for (int i = 0; i < n; i++) { 
-		sum += arr[i];
-	}
-	return sum;
-}
+}*/
+
 
 static uint64_t swaping_naive_sum(int * arr, int swap_idx, int value) {
 	
@@ -95,25 +71,6 @@ static uint64_t swaping_naive_sum(int * arr, int swap_idx, int value) {
 	return diff; 
 }
 
-static uint64_t naive_min(int * arr, size_t n) {
-	uint64_t min = INT_MAX;
-
-	for (int i = 0; i < n; i++) { 
-		if (arr[i] < min) 
-            min = arr[i];
-	}
-	return min;
-}
-
-static uint64_t naive_max(int * arr, size_t n) {
-	uint64_t max = 0;
-
-	for (int i = 0; i < n; i++) { 
-		if (arr[i] > max) 
-            max = arr[i];
-	}
-	return max;
-}
 
 static uint64_t smarter_sum(int * arr, size_t n) {
 
@@ -124,34 +81,29 @@ static uint64_t smarter_sum(int * arr, size_t n) {
 	int left_sum = 0;
 	int right_sum = 0;
 	int  sum; 
-	
-	
-	
-	
-	
-	
+		
 	return sum;
 }
 
 
-static inline void usage(char * prog) {
-	printf("Usage: %s <n> [fun]\n", prog);
-	printf("   <n>: length of array\n");
-    printf("   fun: sum | max | min | smarter sum\n");
-}
-
-static inline void init_array(int * a, size_t len) {
-	for (int i = 0; i < len; i++) {
-		a[i] = rand() % LIMIT;
+/*
+const char * function_option(char ** argv) {
+	 
+	if(argv[2] != NULL { 
+		if(strcmp(argv[2], "sum") == 0) { 
+			f = naive_sum; 
+		} else if 
 	}
+	
 }
+*/
 
 int main(int argc, char ** argv) {
 	
 	size_t len;
 	int idx, new_val; 
 	int ret = 1;
-    uint64_t(*f)(int*, size_t) = naive_sum;
+	uint64_t(*f)(int*, size_t);
 
 	if (argc < 2) {
 		usage(argv[0]);
@@ -166,6 +118,11 @@ int main(int argc, char ** argv) {
 		fprintf(stderr, "Could not allocate array\n");
 		exit(EXIT_FAILURE);
 	}
+	
+
+	init_array(array, len); 
+	printf("Randomly Generated Array: ");
+	print_array(array, len); 
 
     // user specified a function type
     if (argv[2] != NULL) {
@@ -182,11 +139,8 @@ int main(int argc, char ** argv) {
             exit(EXIT_FAILURE);
         }
   }
-
-	init_array(array, len);
-
 	printf("Initial result: %llu\n", f(array, len)); 
-	
+
 	do { 
 #if DEBUG==1
 		print_array(array, len);
@@ -197,6 +151,7 @@ int main(int argc, char ** argv) {
 		printf("Recomputed function: %llu\n", f(array, len)); 
 	}	
 	while (ret != 0);
+
 
 	return 0;
 }
