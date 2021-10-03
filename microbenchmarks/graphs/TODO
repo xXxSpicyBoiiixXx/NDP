@@ -1,0 +1,9 @@
+implement these algorithms on some efficient graph representation, e.g. CSR (see below)
+
+
+node array -> [0| 1 | 2| 3| 4| 5]    = 6 vertices in graph, labeled 0 through 5
+             
+               |    \     \
+edge array   [1 | 2 | 3 | 5 ]
+
+here there is an edge from 0 to 1, from 1 to 3, and from 3 to 5
