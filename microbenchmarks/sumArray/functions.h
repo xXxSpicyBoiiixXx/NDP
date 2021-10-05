@@ -2,8 +2,8 @@
 Header file for functions 
 */
 
-#ifdef FUNCTION_H_
-#define FUNCTION_H_
+#ifndef FUNCTIONS_H_
+#define FUNCTIONS_H_
 
 void print_array(int *arr, size_t len);
 void init_array(int *arr, size_t len);  

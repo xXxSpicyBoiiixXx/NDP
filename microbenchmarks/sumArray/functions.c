@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 #include <stdint.h> 
 #include <limits.h>
+#include "functions.h"
+
 
 /*
  * Function: print_array 
