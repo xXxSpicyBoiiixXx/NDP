@@ -1,29 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include "mergeSort.h" 
-
-#define LIMIT 10 
-
-
-/*
- * 
- */
-void usage(char * prog) {
-	printf("Usage: %s <n> [sort algorithm]\n", prog); 
-	printf("    <n>: length of array\n");
-	printf("    sort algortihm: merge sort |\n");
-}
-
-
-/*
- * 
- */ 
-void init_array(int * a, int len) { 
-	for(int i = 0; i < len; i++) {
-		a[i] = rand() % LIMIT;
-	}
-}
-
+#include "sortAlgo.h" 
 
 /*
  *
@@ -86,12 +63,3 @@ void mergeSort(int * arr, size_t l, size_t r)
     }
 }
 
-/*
- * 
- */
-void print_array(int * arr, int len)
-{
-    for (int i = 0; i < len; i++)
-        printf("%d ", arr[i]);
-    printf("\n");
-}

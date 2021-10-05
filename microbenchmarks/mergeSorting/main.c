@@ -3,9 +3,8 @@
 #include <string.h>
 #include <time.h>
 #include <sys/types.h>
-#include "mergeSort.h"
-
-#define LIMIT 10 
+#include "sortAlgo.h"
+#include "array_functions.h"
 
 int main(int argc, char ** argv) {
 
