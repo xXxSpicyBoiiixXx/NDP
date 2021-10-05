@@ -4,18 +4,30 @@
 
 #define LIMIT 10 
 
+
+/*
+ * 
+ */
 inline void usage(char * prog) {
 	printf("Usage: %s <n> [sort algorithm]\n", prog); 
 	printf("    <n>: length of array\n");
 	printf("    sort algortihm: merge sort |\n");
 }
 
+
+/*
+ * 
+ */ 
 inline void init_array(int * a, size_t len) { 
 	for(int i = 0; i < len; i++) {
 		a[i] = rand() % LIMIT;
 	}
 }
 
+
+/*
+ *
+ */
 void merge(int * arr, int l, int m, int r)
 {
     int i, j, k;
@@ -74,6 +86,9 @@ void mergeSort(int * arr, int l, int r)
     }
 }
 
+/*
+ * 
+ */
 void print_array(int * arr, size_t len)
 {
     for (int i = 0; i < len; i++)
