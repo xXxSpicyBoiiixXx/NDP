@@ -8,7 +8,7 @@
 /*
  * 
  */
-inline void usage(char * prog) {
+void usage(char * prog) {
 	printf("Usage: %s <n> [sort algorithm]\n", prog); 
 	printf("    <n>: length of array\n");
 	printf("    sort algortihm: merge sort |\n");
@@ -18,7 +18,7 @@ inline void usage(char * prog) {
 /*
  * 
  */ 
-inline void init_array(int * a, size_t len) { 
+void init_array(int * a, int len) { 
 	for(int i = 0; i < len; i++) {
 		a[i] = rand() % LIMIT;
 	}
@@ -73,7 +73,7 @@ void merge(int * arr, int l, int m, int r)
     }
 }
 
-void mergeSort(int * arr, int l, int r)
+void mergeSort(int * arr, size_t l, size_t r)
 {
     if (l < r) {
         
@@ -89,7 +89,7 @@ void mergeSort(int * arr, int l, int r)
 /*
  * 
  */
-void print_array(int * arr, size_t len)
+void print_array(int * arr, int len)
 {
     for (int i = 0; i < len; i++)
         printf("%d ", arr[i]);

@@ -2,11 +2,11 @@
 #define MERGESORT_H_
 
 //inline void usage(char * prog); 
-inline void init_array(int * a, size_t len); 
-inline void usage(char *prog);
+void init_array(int * a, int len); 
+void usage(char *prog);
 
-void mergeSort(int * arr, int l, int r);
+void mergeSort(int * arr, size_t l, size_t r);
 void merge(int * arr, int l, int m, int r);
-void print_array(int * arr, size_t len); 
+void print_array(int * arr, int len); 
 
 #endif
