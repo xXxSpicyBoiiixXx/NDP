@@ -9,7 +9,7 @@
 void usage(char *prog) { 
 	printf("Usage: %s <n> [sorting algorithm]\n", prog); 
 	printf("	<n>: length of array\n"); 
-	printf("	sorting algorithm: merge sort |\n"); 
+	printf("	sorting algorithm: merge | bubble |\n"); 
 }
 
 /*

@@ -3,7 +3,7 @@
 #include "sortAlgo.h" 
 
 /*
- *
+ * Merge sorting 
  */
 void merge(int * arr, int l, int m, int r)
 {
@@ -50,7 +50,7 @@ void merge(int * arr, int l, int m, int r)
     }
 }
 
-void mergeSort(int * arr, size_t l, size_t r)
+void mergeSort(int * arr, int l, int r)
 {
     if (l < r) {
         
@@ -64,21 +64,28 @@ void mergeSort(int * arr, size_t l, size_t r)
 }
 
 /*
- * 
+ * Bubble Sort
  */ 
 
 /*
-void bubbleSort(int *arr, 0, size_t len) { 
+void swap(int *element_1, int *element_2) {
+	
+	int temp = *element_1; 
+	*element_1 = *element_2; 
+	*element_2 = temp; 
+}*/
+
+void bubbleSort(int *arr, __attribute__((unused))  int place_holder, int len) { 
 
 	for(int i = 0; i < len; i++) { 
 	
 		for(int j = 0; j < len - i - 1; j++) {	
 			if(arr[j] > arr[j + 1]) {
 				int temp = arr[j]; 
-				arr[j] = arr[j + 1] 
+				arr[j] = arr[j + 1]; 
 				arr[j+1] = temp;
 			}
 	
 		}
 	}
-} */
+} 

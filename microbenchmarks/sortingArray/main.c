@@ -11,7 +11,7 @@ int main(int argc, char ** argv) {
 	size_t len;	
 	int idx, new_val;
 	int ret = 1;	
-	void(*f)(int [],size_t, size_t) = NULL; 
+	void(*f)(int [], int, int) = NULL; 
 // 	uint64_t(*f)(int*, size_t) 	
 
 	clock_t start, end; 
@@ -42,7 +42,9 @@ int main(int argc, char ** argv) {
 
 	if(strcmp(argv[2], "merge") == 0) {
 		f = mergeSort;
-	}
+	} else if(strcmp(argv[2], "bubble") == 0) { 
+		f = bubbleSort; 	
+}
 }
 
 	else{ 
