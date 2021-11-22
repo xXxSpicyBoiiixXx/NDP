@@ -36,7 +36,13 @@ static inline void init_blob(char * a, size_t len) {
 static char *
 concat (struct merkle_node * left, struct merkle_node * right) {
     // TODO: concatenate the hashes of the two merkle nodes together into one HASH_LEN*2 size block
-    return NULL;
+    	
+	// Wouldn't this just add the left and right node together as follows?
+	struct merkle_node merkle_sum;
+	
+	merkle_sum = left + right; 
+	
+	return NULL;
 }
 
 // THIS IS NOT A *REAL* HASH FUNCTION BEWARE
@@ -81,8 +87,23 @@ recompute_merkle_tree(struct merkle_node * root,
                       char * blob,
                       size_t len, 
                       unsigned changed_block_no, // which block changed?
-                      void (*hash_fn)(char* input, size_t len, char* output)) {
-    // TODO: 
+		      void (*hash_fn)(char* input, size_t len, char* output)) {
+    // TODO:
+		
+	if(len == BLOCK_SIZE) { 
+		struct merkle_node * node = malloc(sizeof(struct merkle_node));
+	}	
+	
+	if(node == NULL)
+	{
+	
+	printf("Memory allocation failed");
+	return;
+	}
+	
+	// changed_block_no, I have to find an ID mechnism? 		 
+
+
     return NULL;
 }
 
