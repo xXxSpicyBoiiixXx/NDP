@@ -2,7 +2,7 @@
 #include <stdlib.h> 
 
 #define SIZE 100
-#RAND_MAX 100
+//#RAND_MAX 100
 
 struct queue {
 	int items[SIZE];
@@ -34,7 +34,7 @@ struct Graph {
 
 // BFS algo
 void bfs(struct Graph* graph, int startVertex) { 
-	strcut queue* q = createQueue();
+	struct queue* q = createQueue();
 	
 	graph -> visited[startVertex] = 1;
 	enqueue(q, startVertex); 
@@ -49,7 +49,7 @@ void bfs(struct Graph* graph, int startVertex) {
 		while(temp) { 
 			int adjVertex = temp -> vertex; 
 		
-			if(grahp -> visited[adjVertex] == 0) { 
+			if(graph -> visited[adjVertex] == 0) { 
 				graph -> visited[adjVertex] = 1;
 				enqueue(q, adjVertex);
 			}
@@ -150,7 +150,7 @@ int dequeue(struct queue* q) {
 	return item;
 }
 
-void printQueue(struct* q) { 
+void printQueue(struct queue* q) { 
 	int i = q -> front;
 
 	if(isEmpty(q)) { 
@@ -170,10 +170,11 @@ int main(int argv, char **argc) {
 
 	struct Graph* graph = createGraph(SIZE); 
 	
-	for(i = 0; i < SIZE; i++) {
-		addEdge(graph, rand(), rand()); 
+	for(int i = 0; i < SIZE; i++) {
+		addEdge(graph, rand()%101, rand()%101); 
 	}
 	
-	
 	bfs(graph, 0);
+
+	return 0;
 }
